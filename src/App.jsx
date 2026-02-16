@@ -19,8 +19,24 @@ function App() {
   
   // Calculate Capacity (Example SNR)
   const baseSnr = 25.0; // Clear Sky
-  const currentSnr = Math.max(-5.0, baseSnr - totalLoss);
+  const currentSnr = Math.max(-10.0, baseSnr - totalLoss);
   const { capRank2, capRank1 } = calculateMIMOCapacity(currentSnr, xpd);
+
+  // Recommendation Logic
+  let recommendation = "";
+  let statusClass = "ok";
+
+  if (currentSnr < -3) {
+    recommendation = "LINK BROKEN (SNR < -3dB)";
+    statusClass = "alert";
+  } else if (capRank2 > capRank1 * 1.05) { 
+    // Hysteresis: Rank 2 must be >5% better than Rank 1 to justify complexity
+    recommendation = "Use Dual Pol (Rank 2)";
+    statusClass = "ok";
+  } else {
+    recommendation = "SWITCH TO RANK 1 (Stability)";
+    statusClass = "warn";
+  }
 
   // Prepare Chart Data (Rain Sweep)
   const rainRates = Array.from({ length: 50 }, (_, i) => i * 2);
@@ -82,8 +98,8 @@ function App() {
           <p>XPD (Depolarization): {xpd.toFixed(2)} dB</p>
           <p>Rank 2 Capacity: {capRank2.toFixed(2)} bps/Hz</p>
           <p>Rank 1 Capacity: {capRank1.toFixed(2)} bps/Hz</p>
-          <p className={capRank1 > capRank2 ? 'alert' : 'ok'}>
-            Recommendation: {capRank1 > capRank2 ? "SWITCH TO RANK 1" : "Use Dual Pol (Rank 2)"}
+          <p className={statusClass}>
+            Recommendation: {recommendation}
           </p>
         </div>
       </div>

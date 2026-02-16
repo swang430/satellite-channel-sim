@@ -61,6 +61,16 @@ input[type="range"] {
   background: #ffebee;
   padding: 5px;
   border-radius: 4px;
+  border: 1px solid #d32f2f;
+}
+
+.warn {
+  color: #f57c00;
+  font-weight: bold;
+  background: #fff3e0;
+  padding: 5px;
+  border-radius: 4px;
+  border: 1px solid #f57c00;
 }
 
 .ok {
