@@ -1,0 +1,8 @@
+[
+  { "rainRate": 5, "measuredLoss": 10.2 },
+  { "rainRate": 10, "measuredLoss": 16.5 },
+  { "rainRate": 20, "measuredLoss": 29.8 },
+  { "rainRate": 30, "measuredLoss": 45.1 },
+  { "rainRate": 40, "measuredLoss": 62.0 },
+  { "rainRate": 50, "measuredLoss": 78.5 }
+]

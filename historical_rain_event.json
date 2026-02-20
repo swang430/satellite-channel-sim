@@ -1,0 +1,82 @@
+[
+    {
+        "rainRate": 0.5,
+        "measuredLoss": 1.2
+    },
+    {
+        "rainRate": 1.2,
+        "measuredLoss": 1.8
+    },
+    {
+        "rainRate": 3.5,
+        "measuredLoss": 4.5
+    },
+    {
+        "rainRate": 8.0,
+        "measuredLoss": 12.3
+    },
+    {
+        "rainRate": 15.5,
+        "measuredLoss": 22.1
+    },
+    {
+        "rainRate": 25.0,
+        "measuredLoss": 34.8
+    },
+    {
+        "rainRate": 32.0,
+        "measuredLoss": 45.2
+    },
+    {
+        "rainRate": 45.0,
+        "measuredLoss": 60.1
+    },
+    {
+        "rainRate": 55.0,
+        "measuredLoss": 75.3
+    },
+    {
+        "rainRate": 50.0,
+        "measuredLoss": 68.0
+    },
+    {
+        "rainRate": 42.0,
+        "measuredLoss": 55.5
+    },
+    {
+        "rainRate": 30.0,
+        "measuredLoss": 40.1
+    },
+    {
+        "rainRate": 18.0,
+        "measuredLoss": 26.5
+    },
+    {
+        "rainRate": 10.0,
+        "measuredLoss": 15.2
+    },
+    {
+        "rainRate": 5.0,
+        "measuredLoss": 8.4
+    },
+    {
+        "rainRate": 2.0,
+        "measuredLoss": 3.1
+    },
+    {
+        "rainRate": 0.5,
+        "measuredLoss": 1.3
+    },
+    {
+        "rainRate": 0.1,
+        "measuredLoss": 0.5
+    },
+    {
+        "rainRate": 0.0,
+        "measuredLoss": 0.3
+    },
+    {
+        "rainRate": 0.0,
+        "measuredLoss": 0.2
+    }
+]
