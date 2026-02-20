@@ -1,5 +1,4 @@
-import * as satelliteModule from 'satellite.js';
-const satellite = satelliteModule.default || satelliteModule;
+import * as satellite from 'satellite.js';
 import { create, all } from 'mathjs';
 const math = create(all);
 
