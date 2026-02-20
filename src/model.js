@@ -1,4 +1,5 @@
-import * as satellite from 'satellite.js';
+import * as satelliteModule from 'satellite.js';
+const satellite = satelliteModule.degreesToRadians ? satelliteModule : satelliteModule.default;
 import { create, all } from 'mathjs';
 const math = create(all);
 
