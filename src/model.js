@@ -155,7 +155,7 @@ export function calculateLinkBudget(params) {
   const maxSymbolRateMbaud = dispersionNs > 0.001 ? (1000.0 / (2.0 * dispersionNs)) : 999999;
 
   // Get time-varying fade; bypass for smooth static charts where simTime remains 0
-  const scintLoss = simTime ? getSoSFade(simTime) * scintillationSigma : 0;
+  const scintLoss = (simTime && !params.disableFastFading) ? getSoSFade(simTime) * scintillationSigma : 0;
 
   const totalLoss = totalAtmosphericLoss + fadeLMS + lossFaraday + deltaFspl + pointingLoss + scanLoss + multipathLoss + scintLoss;
 
@@ -168,6 +168,178 @@ export function calculateLinkBudget(params) {
     apparentElevation, refractionCorrection, pointingLoss, scanLoss, multipathLoss, tSky, totalAtmosphericLoss, scintLoss, scintillationSigma,
     groupDelayNs, dispersionNs, maxSymbolRateMbaud
   };
+}
+
+// === Milestone 21: Pass Prediction Algorithm ===
+export function predictPasses(tleLine1, tleLine2, observerLat, observerLon, observerAlt = 0, hoursAhead = 24, minElev = 0) {
+  try {
+    const satrec = satellite.twoline2satrec(tleLine1, tleLine2);
+    const observerGd = {
+      longitude: satellite.degreesToRadians(observerLon),
+      latitude: satellite.degreesToRadians(observerLat),
+      height: observerAlt / 1000.0
+    };
+
+    const passes = [];
+    const now = new Date();
+    const endTime = new Date(now.getTime() + hoursAhead * 3600000);
+    const stepMs = 60000; // 1-minute coarse scan
+    const fineStepMs = 5000; // 5-second fine scan for TCA
+
+    let inPass = false;
+    let aosTime = null;
+    let maxElev = -90;
+    let tcaTime = null;
+
+    function getElev(date) {
+      const pv = satellite.propagate(satrec, date);
+      if (!pv.position) return -999;
+      const gmst = satellite.gstime(date);
+      const ecf = satellite.eciToEcf(pv.position, gmst);
+      const la = satellite.ecfToLookAngles(observerGd, ecf);
+      return satellite.radiansToDegrees(la.elevation);
+    }
+
+    for (let t = now.getTime(); t <= endTime.getTime(); t += stepMs) {
+      const date = new Date(t);
+      const elev = getElev(date);
+      if (elev === -999) continue;
+
+      if (elev > minElev && !inPass) {
+        // AOS detected - refine backwards
+        inPass = true;
+        let refineT = t - stepMs;
+        for (let rt = refineT; rt <= t; rt += fineStepMs) {
+          if (getElev(new Date(rt)) > minElev) { aosTime = new Date(rt); break; }
+        }
+        if (!aosTime) aosTime = date;
+        maxElev = elev;
+        tcaTime = date;
+      } else if (elev > maxElev && inPass) {
+        maxElev = elev;
+        tcaTime = date;
+      } else if (elev <= minElev && inPass) {
+        // LOS detected - refine
+        inPass = false;
+        let losTime = date;
+        for (let rt = t - stepMs; rt <= t; rt += fineStepMs) {
+          if (getElev(new Date(rt)) <= minElev) { losTime = new Date(rt); break; }
+        }
+        const durationSec = (losTime.getTime() - aosTime.getTime()) / 1000;
+        if (maxElev >= 1.0 && durationSec >= 30) {
+          passes.push({
+            aos: aosTime,
+            tca: tcaTime,
+            los: losTime,
+            maxElev: maxElev,
+            durationSec: durationSec
+          });
+        }
+        aosTime = null; maxElev = -90; tcaTime = null;
+      }
+    }
+    return passes;
+  } catch (e) {
+    console.error('Pass Prediction Error:', e);
+    return [];
+  }
+}
+
+// === Milestone 23: Generate Replay Timeline for a Pass ===
+export function generatePassReplay(tleLine1, tleLine2, observerLat, observerLon, observerAlt = 0, startTime, endTime, stepSec = 10, linkParams = {}) {
+  try {
+    const satrec = satellite.twoline2satrec(tleLine1, tleLine2);
+    const observerGd = {
+      longitude: satellite.degreesToRadians(observerLon),
+      latitude: satellite.degreesToRadians(observerLat),
+      height: observerAlt / 1000.0
+    };
+    const timeline = [];
+    for (let t = startTime.getTime(); t <= endTime.getTime(); t += stepSec * 1000) {
+      const date = new Date(t);
+      const pv = satellite.propagate(satrec, date);
+      if (!pv.position) continue;
+      const gmst = satellite.gstime(date);
+      const ecf = satellite.eciToEcf(pv.position, gmst);
+      const la = satellite.ecfToLookAngles(observerGd, ecf);
+      const elev = satellite.radiansToDegrees(la.elevation);
+      const az = satellite.radiansToDegrees(la.azimuth);
+      const range = la.rangeSat;
+      // Compute link budget at this geometry
+      const lb = calculateLinkBudget({ ...linkParams, elevation: Math.max(0.1, elev), slantRange: range });
+      timeline.push({
+        time: date,
+        timeLabel: date.toLocaleTimeString(),
+        elevation: elev,
+        azimuth: az,
+        slantRange: range,
+        totalLoss: lb.totalLoss,
+        tSky: lb.tSky,
+        deltaFspl: lb.deltaFspl,
+        totalAtmosphericLoss: lb.totalAtmosphericLoss,
+        snrEff: lb.snrEff || 0
+      });
+    }
+    return timeline;
+  } catch (e) {
+    console.error('Replay Generation Error:', e);
+    return [];
+  }
+}
+
+// === Milestone 22: Ground Track & Sky Track Computation ===
+export function computeGroundTrack(tleLine1, tleLine2, minutesAhead = 100) {
+  try {
+    const satrec = satellite.twoline2satrec(tleLine1, tleLine2);
+    const points = [];
+    const now = new Date();
+    const stepMin = 1;
+    for (let m = -10; m <= minutesAhead; m += stepMin) {
+      const date = new Date(now.getTime() + m * 60000);
+      const pv = satellite.propagate(satrec, date);
+      if (!pv.position) continue;
+      const gmst = satellite.gstime(date);
+      const geodetic = satellite.eciToGeodetic(pv.position, gmst);
+      points.push({
+        lat: satellite.radiansToDegrees(geodetic.latitude),
+        lon: satellite.radiansToDegrees(geodetic.longitude),
+        alt: geodetic.height,
+        isCurrent: m === 0
+      });
+    }
+    return points;
+  } catch (e) {
+    console.error('Ground Track Error:', e);
+    return [];
+  }
+}
+
+export function computeSkyTrack(tleLine1, tleLine2, observerLat, observerLon, observerAlt = 0, minutesAhead = 100) {
+  try {
+    const satrec = satellite.twoline2satrec(tleLine1, tleLine2);
+    const observerGd = {
+      longitude: satellite.degreesToRadians(observerLon),
+      latitude: satellite.degreesToRadians(observerLat),
+      height: observerAlt / 1000.0
+    };
+    const points = [];
+    const now = new Date();
+    for (let m = -10; m <= minutesAhead; m += 1) {
+      const date = new Date(now.getTime() + m * 60000);
+      const pv = satellite.propagate(satrec, date);
+      if (!pv.position) continue;
+      const gmst = satellite.gstime(date);
+      const ecf = satellite.eciToEcf(pv.position, gmst);
+      const la = satellite.ecfToLookAngles(observerGd, ecf);
+      const elev = satellite.radiansToDegrees(la.elevation);
+      const az = satellite.radiansToDegrees(la.azimuth);
+      points.push({ az, elev, isCurrent: m === 0 });
+    }
+    return points;
+  } catch (e) {
+    console.error('Sky Track Error:', e);
+    return [];
+  }
 }
 
 export function calculateDynamicOrbit(tleLine1, tleLine2, observerLat, observerLon, observerAlt, date = new Date()) {
