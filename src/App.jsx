@@ -4,6 +4,7 @@ import { Line, Scatter } from 'react-chartjs-2';
 import './App.css';
 import { calculateLinkBudget, calculateMIMOCapacity, fitModelToData, calibrateModel, applyCalibration, createDefaultCalibration, calculateDynamicOrbit, predictPasses, computeGroundTrack, computeSkyTrack, generatePassReplay } from './model';
 import ChannelSimPanel from './ChannelSimPanel';
+import UserManual from './UserManual';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, BarController, Title, Tooltip, Legend, ScatterController);
 
@@ -242,6 +243,7 @@ function App() {
   const [tleLine1, setTleLine1] = useState(ISS_TLE1);
   const [tleLine2, setTleLine2] = useState(ISS_TLE2);
   const [isDynamicOrbit, setIsDynamicOrbit] = useState(false);
+  const [showManual, setShowManual] = useState(false);
   const [orbitData, setOrbitData] = useState(null);
   const [passData, setPassData] = useState([]);
   const [passComputing, setPassComputing] = useState(false);
@@ -637,7 +639,19 @@ function App() {
 
   return (
     <div className="App">
-      <h1>Satellite Channel Simulator</h1>
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '15px', marginBottom: '0.5rem' }}>
+        <h1 style={{ margin: 0 }}>Satellite Channel Simulator</h1>
+        <button
+          onClick={() => setShowManual(true)}
+          title="使用手册"
+          style={{
+            background: 'linear-gradient(135deg, #4ecdc4, #3498db)', border: 'none',
+            color: '#fff', fontSize: '1em', padding: '6px 14px', borderRadius: '6px',
+            cursor: 'pointer', fontWeight: 'bold', boxShadow: '0 2px 8px rgba(78,205,196,0.3)',
+            marginLeft: 0
+          }}
+        >📖 使用手册</button>
+      </div>
       <p>Simulating Rain Fade & Depolarization (Ka-Band Example) with Data Calibration</p>
 
       <div className="orbit-controls" style={{ padding: '15px', border: '1px solid #ccc', borderRadius: '5px', marginBottom: '20px', background: '#f9f9f9', textAlign: 'left' }}>
@@ -1056,6 +1070,9 @@ function App() {
           globalParams={params}
         />
       )}
+
+      {/* === 使用手册浮层 === */}
+      {showManual && <UserManual onClose={() => setShowManual(false)} />}
 
     </div>
   );
