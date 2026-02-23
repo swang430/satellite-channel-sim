@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, ScatterController } from 'chart.js';
+import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, BarController, Title, Tooltip, Legend, ScatterController } from 'chart.js';
 import { Line, Scatter } from 'react-chartjs-2';
 import './App.css';
-import { calculateLinkBudget, calculateMIMOCapacity, fitModelToData, calculateDynamicOrbit, predictPasses, computeGroundTrack, computeSkyTrack, generatePassReplay } from './model';
+import { calculateLinkBudget, calculateMIMOCapacity, fitModelToData, calibrateModel, applyCalibration, createDefaultCalibration, calculateDynamicOrbit, predictPasses, computeGroundTrack, computeSkyTrack, generatePassReplay } from './model';
+import ChannelSimPanel from './ChannelSimPanel';
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, ScatterController);
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, BarController, Title, Tooltip, Legend, ScatterController);
 
 
 // === Milestone 22: Ground Track Canvas Component ===
@@ -1015,16 +1016,9 @@ function App() {
       </div>
 
       <div className="calibration-controls">
-        <h3>Calibration & Data Import</h3>
+        <h3>天气数据 & 实时同步</h3>
 
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-          <input type="file" accept=".json" onChange={handleFileUpload} />
-          <button onClick={triggerCalibration} disabled={realData.length === 0}>
-            Run Model Calibration
-          </button>
-        </div>
-
-        <div style={{ marginTop: '15px', padding: '10px', borderTop: '1px solid #ddd' }}>
+        <div style={{ padding: '10px' }}>
           <strong style={{ marginRight: '10px' }}>Live Sync Source:</strong>
           <label style={{ display: 'inline-block', marginRight: '10px', flexDirection: 'row', fontWeight: 'normal' }}>
             <input type="radio" value="A" checked={syncMode === 'A'} onChange={e => setSyncMode(e.target.value)} disabled={isLiveSync} />
@@ -1052,6 +1046,16 @@ function App() {
         </div>
         {fittingInfo && <p className="info-text">{fittingInfo}</p>}
       </div>
+
+      {/* === 信道传播仿真面板 === */}
+      {isDynamicOrbit && (
+        <ChannelSimPanel
+          tleLine1={tleLine1}
+          tleLine2={tleLine2}
+          satName={satName}
+          globalParams={params}
+        />
+      )}
 
     </div>
   );
