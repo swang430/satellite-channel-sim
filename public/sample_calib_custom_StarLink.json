@@ -1,0 +1,70 @@
+{
+    "metadata": {
+        "satellite": {
+            "name": "StarLink-5201",
+            "type": "LEO",
+            "freq": 10.95,
+            "eirp": 36.0,
+            "polarization": "Linear-V",
+            "modulation": "OFDM",
+            "bandwidth": 250.0
+        },
+        "groundStation": {
+            "lat": 39.92,
+            "lon": 116.39,
+            "alt": 50
+        },
+        "receiver": {
+            "gRx": 38.0,
+            "tRx": 120.0,
+            "bandwidth": 250.0
+        },
+        "environment": "urban",
+        "tec": 65,
+        "description": "2026-02-20 北京站 StarLink LEO 过境观测（自定义卫星参数）"
+    },
+    "measurements": [
+        {
+            "timestamp": "2026-02-20T14:00:00Z",
+            "elevation": 20.0,
+            "rainRate": 0.0,
+            "measuredCN0_dB": 9.5,
+            "measuredRSSI_dBm": -91.0
+        },
+        {
+            "timestamp": "2026-02-20T14:01:00Z",
+            "elevation": 35.0,
+            "rainRate": 0.0,
+            "measuredCN0_dB": 12.8,
+            "measuredRSSI_dBm": -86.5
+        },
+        {
+            "timestamp": "2026-02-20T14:02:00Z",
+            "elevation": 55.0,
+            "rainRate": 0.0,
+            "measuredCN0_dB": 15.2,
+            "measuredRSSI_dBm": -82.0
+        },
+        {
+            "timestamp": "2026-02-20T14:03:00Z",
+            "elevation": 72.0,
+            "rainRate": 0.0,
+            "measuredCN0_dB": 16.5,
+            "measuredRSSI_dBm": -80.0
+        },
+        {
+            "timestamp": "2026-02-20T14:04:00Z",
+            "elevation": 50.0,
+            "rainRate": 0.0,
+            "measuredCN0_dB": 14.0,
+            "measuredRSSI_dBm": -84.0
+        },
+        {
+            "timestamp": "2026-02-20T14:05:00Z",
+            "elevation": 25.0,
+            "rainRate": 0.0,
+            "measuredCN0_dB": 10.0,
+            "measuredRSSI_dBm": -90.0
+        }
+    ]
+}
