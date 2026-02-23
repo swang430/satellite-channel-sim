@@ -1,0 +1,93 @@
+{
+    "metadata": {
+        "satellite": "CSS_TIANHE",
+        "band": "S",
+        "groundStation": {
+            "lat": 22.54,
+            "lon": 114.05,
+            "alt": 0
+        },
+        "receiver": {
+            "gRx": 42.0,
+            "tRx": 150.0,
+            "bandwidth": 400.0
+        },
+        "environment": "suburban",
+        "tec": 50,
+        "description": "2026-02-23 深圳站 CSS 天和过境观测"
+    },
+    "measurements": [
+        {
+            "timestamp": "2026-02-23T10:00:00Z",
+            "elevation": 35.2,
+            "rainRate": 3.0,
+            "measuredCN0_dB": 11.5,
+            "measuredRSSI_dBm": -87.2,
+            "measuredXPD_dB": 27.5,
+            "measuredAttenuation_dB": 3.8
+        },
+        {
+            "timestamp": "2026-02-23T10:05:00Z",
+            "elevation": 42.1,
+            "rainRate": 5.0,
+            "measuredCN0_dB": 10.2,
+            "measuredRSSI_dBm": -88.5,
+            "measuredXPD_dB": 25.0,
+            "measuredAttenuation_dB": 5.1
+        },
+        {
+            "timestamp": "2026-02-23T10:10:00Z",
+            "elevation": 55.0,
+            "rainRate": 8.0,
+            "measuredCN0_dB": 8.0,
+            "measuredRSSI_dBm": -90.3,
+            "measuredXPD_dB": 22.0,
+            "measuredAttenuation_dB": 7.5
+        },
+        {
+            "timestamp": "2026-02-23T10:15:00Z",
+            "elevation": 28.4,
+            "rainRate": 0.0,
+            "measuredCN0_dB": 14.8,
+            "measuredRSSI_dBm": -83.0,
+            "measuredXPD_dB": 32.0,
+            "measuredAttenuation_dB": 1.2
+        },
+        {
+            "timestamp": "2026-02-23T10:20:00Z",
+            "elevation": 15.0,
+            "rainRate": 12.0,
+            "measuredCN0_dB": 5.5,
+            "measuredRSSI_dBm": -94.0,
+            "measuredXPD_dB": 18.0,
+            "measuredAttenuation_dB": 12.0
+        },
+        {
+            "timestamp": "2026-02-23T10:25:00Z",
+            "elevation": 60.5,
+            "rainRate": 2.0,
+            "measuredCN0_dB": 13.5,
+            "measuredRSSI_dBm": -84.5,
+            "measuredXPD_dB": 30.0,
+            "measuredAttenuation_dB": 2.5
+        },
+        {
+            "timestamp": "2026-02-23T10:30:00Z",
+            "elevation": 45.0,
+            "rainRate": 15.0,
+            "measuredCN0_dB": 4.2,
+            "measuredRSSI_dBm": -96.0,
+            "measuredXPD_dB": 16.5,
+            "measuredAttenuation_dB": 15.5
+        },
+        {
+            "timestamp": "2026-02-23T10:35:00Z",
+            "elevation": 38.0,
+            "rainRate": 1.0,
+            "measuredCN0_dB": 13.0,
+            "measuredRSSI_dBm": -85.8,
+            "measuredXPD_dB": 29.0,
+            "measuredAttenuation_dB": 2.0
+        }
+    ]
+}
