@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, BarController, Title, Tooltip, Legend, ScatterController } from 'chart.js';
 import { Line, Scatter } from 'react-chartjs-2';
 import './App.css';
-import { calculateLinkBudget, calculateMIMOCapacity, fitModelToData, calibrateModel, applyCalibration, createDefaultCalibration, calculateDynamicOrbit, predictPasses, computeGroundTrack, computeSkyTrack, generatePassReplay } from './model';
+import { calculateLinkBudget, calculateMIMOCapacity, fitModelToData, calibrateModel, applyCalibration, createDefaultCalibration, calculateDynamicOrbit, predictPasses, computeGroundTrack, computeSkyTrack, generatePassReplay, generateWgs84TrajectoryCsv } from './model';
 import ChannelSimPanel from './ChannelSimPanel';
 import UserManual from './UserManual';
 
@@ -299,6 +299,28 @@ function App() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = `replay_${satName || 'sat'}_${new Date().toISOString().slice(0, 16)}.csv`; a.click();
     URL.revokeObjectURL(url);
+  }
+
+  function handleExportWgs84Trajectory() {
+    const startTime = new Date();
+    const csv = generateWgs84TrajectoryCsv(tleLine1, tleLine2, startTime, 24, 1);
+    if (!csv) {
+      setTleFetchError('Failed to export WGS84 trajectory. Please verify the current TLE lines.');
+      return;
+    }
+
+    const safeSat = (satName || noradId || 'satellite').replace(/[^a-zA-Z0-9._-]+/g, '_');
+    const fileStamp = startTime.toISOString().replace(/:/g, '-').slice(0, 19);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${safeSat}_wgs84_trajectory_${fileStamp}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setTleFetchError('');
   }
   const [satName, setSatName] = useState('ISS (ZARYA)');
   const [noradId, setNoradId] = useState('25544');
@@ -718,6 +740,15 @@ function App() {
 
             <input type="text" value={tleLine1} onChange={e => setTleLine1(e.target.value)} placeholder="TLE Line 1" style={{ width: '100%', fontFamily: 'monospace', fontSize: '0.9em' }} />
             <input type="text" value={tleLine2} onChange={e => setTleLine2(e.target.value)} placeholder="TLE Line 2" style={{ width: '100%', fontFamily: 'monospace', fontSize: '0.9em' }} />
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginTop: '2px' }}>
+              <button
+                onClick={handleExportWgs84Trajectory}
+                style={{ padding: '4px 12px', background: '#138496', color: 'white', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}
+              >
+                ⬇️ Export WGS84 Trajectory
+              </button>
+              <small style={{ color: '#666' }}>24h window, 1-minute interval, starting from now (CSV)</small>
+            </div>
             {orbitData && (
               <div style={{ fontSize: '0.9em', color: '#0056b3', marginTop: '5px' }}>
                 <strong>Live Tracking:</strong> Azimuth {orbitData.azimuth.toFixed(1)}° | Elevation {orbitData.elevation.toFixed(1)}° | Slant Range {orbitData.slantRange.toFixed(1)} km

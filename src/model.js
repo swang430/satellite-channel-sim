@@ -314,6 +314,49 @@ export function computeGroundTrack(tleLine1, tleLine2, minutesAhead = 100) {
   }
 }
 
+// Generate WGS84 trajectory samples from TLE using SGP4 propagation.
+export function generateWgs84Trajectory(tleLine1, tleLine2, startTime = new Date(), durationHours = 24, stepMinutes = 1) {
+  try {
+    const satrec = satellite.twoline2satrec(tleLine1, tleLine2);
+    const totalMinutes = Math.max(1, Math.round(durationHours * 60));
+    const stepMin = Math.max(1, Math.round(stepMinutes));
+    const start = new Date(startTime);
+    const samples = [];
+
+    for (let minute = 0; minute <= totalMinutes; minute += stepMin) {
+      const date = new Date(start.getTime() + minute * 60000);
+      const pv = satellite.propagate(satrec, date);
+      if (!pv.position) continue;
+
+      const gmst = satellite.gstime(date);
+      const geodetic = satellite.eciToGeodetic(pv.position, gmst);
+      samples.push({
+        timestamp: date.toISOString(),
+        latitudeDeg: satellite.radiansToDegrees(geodetic.latitude),
+        longitudeDeg: satellite.radiansToDegrees(geodetic.longitude),
+        altitudeKm: geodetic.height
+      });
+    }
+
+    return samples;
+  } catch (e) {
+    console.error('WGS84 Trajectory Generation Error:', e);
+    return [];
+  }
+}
+
+export function generateWgs84TrajectoryCsv(tleLine1, tleLine2, startTime = new Date(), durationHours = 24, stepMinutes = 1) {
+  const trajectory = generateWgs84Trajectory(tleLine1, tleLine2, startTime, durationHours, stepMinutes);
+  if (!trajectory.length) return '';
+
+  const header = 'Timestamp,Latitude (deg),Longitude (deg),Altitude (km)';
+  const rows = trajectory.map((p) => {
+    return `${p.timestamp},${p.latitudeDeg.toFixed(6)},${p.longitudeDeg.toFixed(6)},${p.altitudeKm.toFixed(3)}`;
+  });
+
+  return [header, ...rows].join('\n');
+}
+
 export function computeSkyTrack(tleLine1, tleLine2, observerLat, observerLon, observerAlt = 0, minutesAhead = 100) {
   try {
     const satrec = satellite.twoline2satrec(tleLine1, tleLine2);
@@ -937,6 +980,44 @@ export function generateChannelTimeSeries(
     return timeline;
   } catch (e) {
     console.error('Channel TimeSeries Generation Error:', e);
+    return [];
+  }
+}
+
+export function generateTrajectoryExport(tleLine1, tleLine2, gsLat, gsLon, gsAlt = 0, hours = 24, stepMinutes = 1) {
+  try {
+    const satrec = satellite.twoline2satrec(tleLine1, tleLine2);
+    const points = [];
+    const now = new Date();
+    const gsGd = {
+      latitude: satellite.degreesToRadians(gsLat),
+      longitude: satellite.degreesToRadians(gsLon),
+      height: gsAlt / 1000
+    };
+
+    for (let m = 0; m <= hours * 60; m += stepMinutes) {
+      const date = new Date(now.getTime() + m * 60000);
+      const pv = satellite.propagate(satrec, date);
+      if (!pv.position) continue;
+      const gmst = satellite.gstime(date);
+      const geodetic = satellite.eciToGeodetic(pv.position, gmst);
+      
+      const positionEcf = satellite.eciToEcf(pv.position, gmst);
+      const lookAngles = satellite.ecfToLookAngles(gsGd, positionEcf);
+
+      points.push({
+        time: date.toISOString(),
+        satLat: satellite.radiansToDegrees(geodetic.latitude),
+        satLon: satellite.radiansToDegrees(geodetic.longitude),
+        satAlt: geodetic.height,
+        azimuth: satellite.radiansToDegrees(lookAngles.azimuth),
+        elevation: satellite.radiansToDegrees(lookAngles.elevation),
+        range: lookAngles.range
+      });
+    }
+    return points;
+  } catch (e) {
+    console.error("Trajectory generation error:", e);
     return [];
   }
 }
