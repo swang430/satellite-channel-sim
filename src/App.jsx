@@ -303,7 +303,8 @@ function App() {
 
   function handleExportWgs84Trajectory() {
     const startTime = new Date();
-    const csv = generateWgs84TrajectoryCsv(tleLine1, tleLine2, startTime, 24, 1);
+    // Generate 60 seconds of data at 1ms precision (1/60000 minutes) to avoid browser crash
+    const csv = generateWgs84TrajectoryCsv(tleLine1, tleLine2, startTime, 1/60, 1/60000);
     if (!csv) {
       setTleFetchError('Failed to export WGS84 trajectory. Please verify the current TLE lines.');
       return;
@@ -747,7 +748,7 @@ function App() {
               >
                 ⬇️ Export WGS84 Trajectory
               </button>
-              <small style={{ color: '#666' }}>24h window, 1-minute interval, starting from now (CSV)</small>
+              <small style={{ color: '#666' }}>60s window, 1ms interval, starting from now (CSV)</small>
             </div>
             {orbitData && (
               <div style={{ fontSize: '0.9em', color: '#0056b3', marginTop: '5px' }}>

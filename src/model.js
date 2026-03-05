@@ -318,8 +318,8 @@ export function computeGroundTrack(tleLine1, tleLine2, minutesAhead = 100) {
 export function generateWgs84Trajectory(tleLine1, tleLine2, startTime = new Date(), durationHours = 24, stepMinutes = 1) {
   try {
     const satrec = satellite.twoline2satrec(tleLine1, tleLine2);
-    const totalMinutes = Math.max(1, Math.round(durationHours * 60));
-    const stepMin = Math.max(1, Math.round(stepMinutes));
+    const totalMinutes = durationHours * 60;
+    const stepMin = stepMinutes;
     const start = new Date(startTime);
     const samples = [];
 
