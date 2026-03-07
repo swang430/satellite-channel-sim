@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Line, Bar } from 'react-chartjs-2';
+import JSZip from 'jszip';
+import { read as readMat } from 'mat-for-js';
 import { generateChannelTimeSeries, predictPasses, calibrateModel, applyCalibration, createDefaultCalibration, getCalibParamDefs } from './model.js';
 import { getSatelliteList, getSatelliteBandParams } from './knownSatellites.js';
 
@@ -45,6 +47,11 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
     const [computing, setComputing] = useState(false);
     const [cirIdx, setCirIdx] = useState(0);
     const [statusMsg, setStatusMsg] = useState('');
+
+    // === External CIR Import (ZIP of .mat frames) ===
+    const [importInfo, setImportInfo] = useState(null);
+    const [isCirPlaying, setIsCirPlaying] = useState(false);
+    const [cirFps, setCirFps] = useState(5);
 
     // === Pass Search State ===
     const [passes, setPasses] = useState([]);
@@ -105,6 +112,7 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
                 linkParams
             );
             setTimeline(result);
+            setImportInfo(null);
             setCirIdx(0);
             const visibleFrames = result.filter(f => f.elevation > 0);
             if (visibleFrames.length === 0) {
@@ -116,6 +124,142 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
             setComputing(false);
         }, 50);
     }
+
+    function safeNum(x, fallback = 0) {
+        if (typeof x === 'number' && Number.isFinite(x)) return x;
+        if (typeof x === 'bigint') return Number(x);
+        return fallback;
+    }
+
+    function buildCirFromRays(rays) {
+        // rays: array of rows (N x 19) float
+        // Heuristic mapping (based on sample):
+        // - delay_s ~ col[2]
+        // - amplitude_dB ~ col[8] (often negative, seems like path gain / relative power)
+        const taps = (rays || []).map((row, i) => {
+            const delay_s = safeNum(row?.[2], 0);
+            const delay_ns = delay_s * 1e9;
+            const amp_dB = safeNum(row?.[8], 0);
+            return {
+                excessDelay_ns: delay_ns,
+                amplitude_dB: amp_dB,
+                label: 'Tap' + (i + 1)
+            };
+        }).sort((a, b) => a.excessDelay_ns - b.excessDelay_ns);
+
+        // Use all taps
+        const pLin = taps.map(t => Math.pow(10, t.amplitude_dB / 10));
+        const sumP = pLin.reduce((a, b) => a + b, 0) || 1;
+        const meanTau = taps.reduce((acc, t, idx) => acc + t.excessDelay_ns * pLin[idx], 0) / sumP;
+        const meanTau2 = taps.reduce((acc, t, idx) => acc + (t.excessDelay_ns ** 2) * pLin[idx], 0) / sumP;
+        const rms = Math.sqrt(Math.max(0, meanTau2 - meanTau ** 2));
+        const coherenceMHz = rms > 0 ? (1 / (5 * rms * 1e-9)) / 1e6 : 0; // ~1/(5*sigma_tau)
+
+        return {
+            taps: taps.length ? taps : [{ excessDelay_ns: 0, amplitude_dB: 0, label: 'LOS' }],
+            rmsDelaySpread_ns: safeNum(rms, 0),
+            coherenceBandwidth_MHz: safeNum(coherenceMHz, 0)
+        };
+    }
+
+    async function handleImportCirZip(file) {
+        if (!file) return;
+        setComputing(true);
+        setStatusMsg('\u23f3 Importing CIR frames from ZIP...');
+        try {
+            const ab = await file.arrayBuffer();
+            const zip = await JSZip.loadAsync(ab);
+            const entries = Object.keys(zip.files)
+                .filter(name => name.toLowerCase().endsWith('.mat') && !zip.files[name].dir);
+
+            if (entries.length === 0) {
+                setStatusMsg('\u26a0\ufe0f No .mat files found in ZIP');
+                setComputing(false);
+                return;
+            }
+
+            function frameIndexFromName(name) {
+                const m = name.match(/(\d+)/g);
+                if (!m) return Number.MAX_SAFE_INTEGER;
+                return parseInt(m[m.length - 1], 10);
+            }
+
+            entries.sort((a, b) => frameIndexFromName(a) - frameIndexFromName(b));
+
+            const frames = [];
+            for (let i = 0; i < entries.length; i++) {
+                const name = entries[i];
+                const u8 = await zip.files[name].async('uint8array');
+                const ab = u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
+                const matFile = readMat(ab);
+                const mat = matFile?.data || matFile;
+
+                // mat-for-js returns {header, data}
+                const numberRays = safeNum(mat?.NumberRays?.[0], 0);
+                let rays = mat?.RaysProperties;
+
+                // Normalize RaysProperties into array-of-rows
+                // Common shapes: [N][19] or flat [1][19]
+                if (Array.isArray(rays) && Array.isArray(rays[0]) && typeof rays[0][0] === 'number') {
+                    // already rows
+                } else if (Array.isArray(rays) && typeof rays[0] === 'number') {
+                    rays = [rays];
+                } else {
+                    rays = [];
+                }
+
+                // If NumberRays hints multiple rays but rays parsed as flat, try chunking
+                if (numberRays > 1 && rays.length === 1 && rays[0].length === numberRays * 19) {
+                    const flat = rays[0];
+                    rays = [];
+                    for (let r = 0; r < numberRays; r++) rays.push(flat.slice(r * 19, (r + 1) * 19));
+                }
+
+                const cir = buildCirFromRays(rays);
+                const idx = frameIndexFromName(name);
+                frames.push({
+                    timeLabel: `Imported frame ${idx}`,
+                    elevation: 10,
+                    azimuth: 0,
+                    slantRange: 0,
+                    absoluteFspl: 0,
+                    rxPowerDbm: -80,
+                    snrDb: 0,
+                    noiseFloorDbm: -100,
+                    tSky: 0,
+                    xpd: 0,
+                    capRank2: 0,
+                    groupDelayNs: cir.taps[0].excessDelay_ns,
+                    dispersionNs: cir.rmsDelaySpread_ns,
+                    cir
+                });
+            }
+
+            setTimeline(frames);
+            setImportInfo({ name: file.name, frames: frames.length });
+            setCirIdx(0);
+            setStatusMsg(`\u2705 Imported ${frames.length} frames from ${file.name}. Use Play to view over time.`);
+        } catch (e) {
+            console.error(e);
+            setStatusMsg('\u26a0\ufe0f Import failed: ' + (e?.message || String(e)));
+        } finally {
+            setComputing(false);
+        }
+    }
+
+    // === CIR playback ===
+    useEffect(() => {
+        if (!isCirPlaying || timeline.length === 0) return;
+        const intervalMs = Math.max(20, Math.round(1000 / Math.max(1, cirFps)));
+        const timer = setInterval(() => {
+            setCirIdx(prev => {
+                const next = prev + 1;
+                if (next >= timeline.length) return 0;
+                return next;
+            });
+        }, intervalMs);
+        return () => clearInterval(timer);
+    }, [isCirPlaying, cirFps, timeline.length]);
 
     // === CIR Canvas ===
     useEffect(() => {
@@ -926,18 +1070,52 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
                     </div>
 
                     <div style={{ background: 'rgba(0,0,0,0.3)', borderRadius: '6px', padding: '12px', marginBottom: '15px' }}>
-                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '8px' }}>
+                        {/* Import ZIP of .mat frames */}
+                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '10px' }}>
+                            <strong style={{ fontSize: '0.9em' }}>Import CIR:</strong>
+                            <input
+                                type="file"
+                                accept=".zip"
+                                onChange={e => handleImportCirZip(e.target.files?.[0])}
+                                style={{ maxWidth: '320px' }}
+                            />
+                            {importInfo && (
+                                <span style={{ fontFamily: 'monospace', fontSize: '0.85em', color: '#88ccff' }}>
+                                    Loaded: {importInfo.name} ({importInfo.frames} frames)
+                                </span>
+                            )}
+                            <button
+                                onClick={() => { setTimeline([]); setImportInfo(null); setIsCirPlaying(false); setStatusMsg('Cleared imported CIR'); }}
+                                style={{ padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', background: '#2c3e50', color: '#eee', border: '1px solid #555' }}
+                            >
+                                Clear
+                            </button>
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap' }}>
                             <strong style={{ fontSize: '0.9em' }}>CIR Frame:</strong>
+                            <button
+                                onClick={() => setIsCirPlaying(p => !p)}
+                                style={{ padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', background: isCirPlaying ? '#f39c12' : '#4ecdc4', color: '#000', border: '1px solid #333', fontWeight: 'bold' }}
+                            >
+                                {isCirPlaying ? '⏸ Pause' : '▶ Play'}
+                            </button>
+                            <span style={{ fontSize: '0.85em', color: '#aaa' }}>FPS</span>
+                            <input type="number" min={1} max={60} value={cirFps} onChange={e => setCirFps(parseInt(e.target.value || '5'))} style={{ width: '70px' }} />
+
                             <input
                                 type="range"
                                 min={0}
                                 max={timeline.length - 1}
                                 value={cirIdx}
-                                onChange={e => setCirIdx(parseInt(e.target.value))}
-                                style={{ flex: 1 }}
+                                onChange={e => { setIsCirPlaying(false); setCirIdx(parseInt(e.target.value)); }}
+                                style={{ flex: 1, minWidth: '240px' }}
                             />
-                            <span style={{ fontFamily: 'monospace', fontSize: '0.85em', minWidth: '280px', textAlign: 'right' }}>
-                                {timeline[cirIdx]?.timeLabel} | El: {timeline[cirIdx]?.elevation.toFixed(1)}{'\u00b0'} | SNR: {timeline[cirIdx]?.snrDb.toFixed(1)}dB | RxP: {timeline[cirIdx]?.rxPowerDbm.toFixed(1)}dBm
+                            <span style={{ fontFamily: 'monospace', fontSize: '0.85em', minWidth: '300px', textAlign: 'right' }}>
+                                {timeline[cirIdx]?.timeLabel || ''}
+                                {' | El: '}{safeNum(timeline[cirIdx]?.elevation, 0).toFixed(1)}{'\u00b0'}
+                                {' | SNR: '}{safeNum(timeline[cirIdx]?.snrDb, 0).toFixed(1)}{'dB'}
+                                {' | RxP: '}{safeNum(timeline[cirIdx]?.rxPowerDbm, 0).toFixed(1)}{'dBm'}
                             </span>
                         </div>
                         <canvas ref={cirCanvasRef} width={700} height={280} style={{ width: '100%', borderRadius: '4px' }} />
