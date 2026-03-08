@@ -7,6 +7,9 @@ import ChannelSimPanel from './ChannelSimPanel';
 import UserManual from './UserManual';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, BarController, Title, Tooltip, Legend, ScatterController);
+ChartJS.defaults.color = 'rgba(0, 229, 255, 0.7)';
+ChartJS.defaults.borderColor = 'rgba(0, 229, 255, 0.1)';
+ChartJS.defaults.font.family = "'Space Mono', monospace";
 
 
 // === Milestone 22: Ground Track Canvas Component ===

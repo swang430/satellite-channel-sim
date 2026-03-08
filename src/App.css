@@ -1,119 +1,158 @@
 #root {
-  max-width: 1280px;
+  max-width: 1400px;
   margin: 0 auto;
   padding: 2rem;
   text-align: center;
 }
 
 h1 {
-  font-size: 2.5rem;
+  font-size: 2.8rem;
   margin-bottom: 0.5rem;
-  color: #2c3e50;
+  border-bottom: 1px solid var(--border-neon);
+  padding-bottom: 1rem;
+  display: inline-block;
+}
+
+/* Panel Containers */
+.controls, .calibration-controls, .card {
+  background: var(--panel-bg);
+  border: 1px solid var(--border-neon);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5), inset 0 0 10px rgba(0, 229, 255, 0.05);
+  border-radius: 2px;
+  backdrop-filter: blur(5px);
+  position: relative;
+}
+
+.controls::before, .calibration-controls::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  width: 10px; height: 10px;
+  border-top: 2px solid var(--accent-cyan);
+  border-left: 2px solid var(--accent-cyan);
+}
+.controls::after, .calibration-controls::after {
+  content: '';
+  position: absolute;
+  bottom: 0; right: 0;
+  width: 10px; height: 10px;
+  border-bottom: 2px solid var(--accent-cyan);
+  border-right: 2px solid var(--accent-cyan);
 }
 
 .controls, .calibration-controls {
   display: flex;
   flex-wrap: wrap;
-  gap: 1rem;
+  gap: 1.5rem;
   justify-content: center;
-  background: #f8f9fa;
-  padding: 1.5rem;
-  border-radius: 8px;
+  padding: 2rem;
   margin-bottom: 2rem;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
 .calibration-controls {
   flex-direction: column;
-  background: #eef2f5;
-  border-left: 4px solid #3498db;
+  border-left: 3px solid var(--accent-orange);
 }
 
 .calibration-controls h3 {
-  margin: 0 0 10px 0;
-  color: #34495e;
+  color: var(--accent-orange);
+  text-shadow: 0 0 8px rgba(255, 153, 0, 0.4);
 }
 
 label {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  font-weight: bold;
-  font-size: 0.9rem;
-  color: #333;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
 }
 
+/* Inputs & Selects */
 input, select {
   margin-top: 0.5rem;
-  padding: 0.5rem;
-  border: 1px solid #ccc;
-  border-radius: 4px;
+  padding: 0.6rem;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(0, 229, 255, 0.3);
+  color: var(--accent-cyan);
+  font-family: 'Space Mono', monospace;
+  font-size: 1rem;
+  border-radius: 2px;
+  outline: none;
+  transition: border-color 0.3s, box-shadow 0.3s;
 }
 
-button {
-  padding: 0.5rem 1rem;
-  background-color: #3498db;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-weight: bold;
-  margin-left: 1rem;
+input:focus, select:focus {
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 8px rgba(0, 229, 255, 0.4);
 }
 
-button:disabled {
-  background-color: #95a5a6;
-  cursor: not-allowed;
-}
-
+/* Results Section */
 .results {
   display: flex;
   justify-content: center;
+  flex-wrap: wrap;
   gap: 2rem;
   margin-bottom: 2rem;
 }
 
 .card {
-  background: white;
   padding: 1.5rem;
-  border-radius: 8px;
-  box-shadow: 0 4px 6px rgba(0,0,0,0.1);
   min-width: 250px;
   text-align: left;
+  border-top: 3px solid var(--accent-cyan);
 }
 
 .card h3 {
   margin-top: 0;
-  border-bottom: 2px solid #eee;
+  border-bottom: 1px dashed rgba(0, 229, 255, 0.3);
   padding-bottom: 0.5rem;
-  color: #2c3e50;
+  font-size: 1.1rem;
 }
 
+.card p {
+  margin: 0.5rem 0;
+  font-size: 0.95rem;
+  display: flex;
+  justify-content: space-between;
+}
+
+.card p strong {
+  color: var(--text-muted);
+  font-weight: normal;
+}
+
+/* Status Indicators */
 .ok {
-  color: #27ae60;
-  font-weight: bold;
+  color: var(--accent-green);
+  text-shadow: 0 0 5px rgba(0, 255, 102, 0.5);
 }
 
 .warn {
-  color: #f39c12;
-  font-weight: bold;
+  color: var(--accent-orange);
+  text-shadow: 0 0 5px rgba(255, 153, 0, 0.5);
 }
 
 .alert {
-  color: #c0392b;
-  font-weight: bold;
+  color: var(--accent-alert);
+  text-shadow: 0 0 5px rgba(255, 51, 51, 0.5);
+  animation: blink 1s infinite alternate;
 }
 
+@keyframes blink {
+  from { opacity: 1; }
+  to { opacity: 0.5; }
+}
+
+/* Chart containers */
 .chart-container {
-  background: white;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(0, 229, 255, 0.15);
   padding: 1rem;
-  border-radius: 8px;
-  box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+  position: relative;
 }
 
-.info-text {
-  margin-top: 10px;
-  font-style: italic;
-  color: #2ecc71;
-  font-weight: bold;
+canvas {
+  filter: drop-shadow(0 0 3px rgba(0, 229, 255, 0.2));
 }

@@ -458,8 +458,8 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
             {
                 label: 'Rx Power (dBm)',
                 data: timeline.map(f => f.elevation > 0 ? f.rxPowerDbm : null),
-                borderColor: '#ff6b6b',
-                backgroundColor: 'rgba(255, 107, 107, 0.1)',
+                borderColor: '#ff3333',
+                backgroundColor: 'rgba(255, 51, 51, 0.1)',
                 yAxisID: 'y1',
                 tension: 0.3,
                 pointRadius: 0,
@@ -469,7 +469,8 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
             {
                 label: 'SNR (dB)',
                 data: timeline.map(f => f.elevation > 0 ? f.snrDb : null),
-                borderColor: '#4ecdc4',
+                borderColor: '#00e5ff',
+                backgroundColor: 'rgba(0, 229, 255, 0.1)',
                 yAxisID: 'y1',
                 tension: 0.3,
                 pointRadius: 0,
@@ -478,8 +479,8 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
             {
                 label: 'Elevation (\u00b0)',
                 data: timeline.map(f => f.elevation),
-                borderColor: '#28a745',
-                backgroundColor: 'rgba(40,167,69,0.05)',
+                borderColor: '#00ff66',
+                backgroundColor: 'rgba(0, 255, 102, 0.05)',
                 yAxisID: 'y2',
                 tension: 0.3,
                 pointRadius: 0,
