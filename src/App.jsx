@@ -260,6 +260,10 @@ function App() {
   const [replaySpeed, setReplaySpeed] = useState(5);
   const replayTimerRef = useRef(null);
   const [replayMinutesAhead, setReplayMinutesAhead] = useState(20);
+  const [replayStartTime, setReplayStartTime] = useState(() => {
+    const tzOffset = (new Date()).getTimezoneOffset() * 60000;
+    return (new Date(Date.now() - tzOffset)).toISOString().slice(0, 16);
+  });
 
   // Replay animation effect
   useEffect(() => {
@@ -283,9 +287,9 @@ function App() {
   }, [replayIdx, replayTimeline]);
 
   function handleGenerateReplay() {
-    const now = new Date();
-    const end = new Date(now.getTime() + replayMinutesAhead * 60000);
-    const tl = generatePassReplay(tleLine1, tleLine2, syncLat, syncLon, gsAlt, now, end, 10, params);
+    const start = new Date(replayStartTime);
+    const end = new Date(start.getTime() + replayMinutesAhead * 60000);
+    const tl = generatePassReplay(tleLine1, tleLine2, syncLat, syncLon, gsAlt, start, end, 10, params);
     setReplayTimeline(tl);
     setReplayIdx(0);
     setIsReplaying(false);
@@ -834,6 +838,9 @@ function App() {
         <div style={{ padding: '15px', border: '1px solid #555', borderRadius: '5px', marginBottom: '20px', background: '#1a1a2e', color: '#eee', textAlign: 'left' }}>
           <h3 style={{ margin: '0 0 10px 0' }}>⏱️ Historical Replay & Channel Analysis</h3>
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '10px' }}>
+            <label>Start Time:
+              <input type="datetime-local" value={replayStartTime} onChange={e => setReplayStartTime(e.target.value)} style={{ marginLeft: '4px' }} />
+            </label>
             <label>Duration (min):
               <input type="number" min="5" max="120" value={replayMinutesAhead} onChange={e => setReplayMinutesAhead(parseInt(e.target.value) || 20)} style={{ width: '50px', marginLeft: '4px' }} />
             </label>
