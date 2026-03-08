@@ -44,7 +44,7 @@ export default function UserManual({ onClose }) {
                         <h1 style={{ fontSize: '1.5em', color: '#fff', margin: '0 0 4px 0' }}>
                             📖 卫星信道仿真系统 — 使用手册
                         </h1>
-                        <div style={{ fontSize: '0.85em', color: '#888' }}>Satellite Channel Propagation Simulator v2.0</div>
+                        <div style={{ fontSize: '0.85em', color: '#888' }}>Satellite Channel Propagation Simulator v2.1</div>
                     </div>
                     <button onClick={onClose} style={{
                         background: 'rgba(255,100,100,0.15)', border: '1px solid rgba(255,100,100,0.4)',
@@ -65,7 +65,8 @@ export default function UserManual({ onClose }) {
                             ['5', '地面测量校准系统'],
                             ['6', '天气数据与实时同步'],
                             ['7', '数据导出'],
-                            ['8', '校准数据格式规范']
+                            ['8', '校准数据格式规范'],
+                            ['9', '物理常识验证模块']
                         ].map(([n, title]) => (
                             <div key={n} style={{ color: '#aaa' }}>
                                 <span style={{ color: '#4ecdc4', fontWeight: 'bold' }}>{n}.</span> {title}
@@ -375,6 +376,23 @@ export default function UserManual({ onClose }) {
                     </table>
                 </div>
 
+                {/* 9. 物理常识验证模块 */}
+                <div style={sectionStyle}>
+                    <h2 style={h2Style}>9. 物理常识验证模块 (Validation) ✅</h2>
+                    <p>系统内置了基于物理常识（Rule of Thumb）的验证模块，用于在生成仿真数据时，自动核对结果是否符合客观物理规律。</p>
+
+                    <h3 style={h3Style}>验证基准</h3>
+                    <ul style={{ paddingLeft: '20px', fontSize: '0.9em', lineHeight: '1.6', color: '#ccc' }}>
+                        <li><strong>自由空间路径损耗 (FSPL)</strong>：接收功率与理论 Friis 方程的偏差应在合理范围内（0 ~ 8 dB 的大气/极化损耗）。</li>
+                        <li><strong>多普勒与信噪比包络</strong>：低轨卫星（LEO）过境必须呈现大动态范围（&gt; 5dB）的抛物线。</li>
+                        <li><strong>降雨衰减验证</strong>：高频段（Ku/Ka）在强降雨下必须出现断崖式衰减；低频段（S/L）应表现出抗衰减特性。</li>
+                        <li><strong>多径与环境衰落</strong>：城市（Urban）环境相比开阔地（Rural）必须表现出显著的附加遮挡损耗。</li>
+                    </ul>
+
+                    <h3 style={h3Style}>Web 端 UI 诊断</h3>
+                    <p>在信道仿真面板中配置参数并点击 <span style={codeStyle}>🚀 Generate</span> 后，可按键盘 <code style={codeStyle}>F12</code> 打开浏览器控制台 (Console) 查看诊断报告。系统会自动进行理论预算与仿真结果的交叉比对，如发现严重偏离常识的失真（如损耗异常、包络异常），会输出 <span style={{color:'#ff6b6b', fontWeight:'bold'}}>❌ 偏差过大</span> 警告，协助排查参数输入错误。</p>
+                </div>
+
                 {/* 已知卫星 ID 参考 */}
                 <div style={sectionStyle}>
                     <h2 style={h2Style}>附录：已知卫星 ID 速查</h2>
@@ -395,7 +413,7 @@ export default function UserManual({ onClose }) {
 
                 {/* Footer */}
                 <div style={{ textAlign: 'center', padding: '10px', color: '#555', fontSize: '0.8em', borderTop: '1px solid rgba(255,255,255,0.05)', marginTop: '10px' }}>
-                    Satellite Channel Propagation Simulator v2.0 | 校准系统升级 2026-02-23
+                    Satellite Channel Propagation Simulator v2.1 | 加入常识验证模块 2026-03
                 </div>
             </div>
         </div>
