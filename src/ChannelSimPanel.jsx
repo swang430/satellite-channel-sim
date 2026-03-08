@@ -4,6 +4,7 @@ import JSZip from 'jszip';
 import { read as readMat } from 'mat-for-js';
 import { generateChannelTimeSeries, predictPasses, calibrateModel, applyCalibration, createDefaultCalibration, getCalibParamDefs } from './model.js';
 import { getSatelliteList, getSatelliteBandParams } from './knownSatellites.js';
+import { SimulationValidator } from './ValidationModule.js';
 
 /**
  * Channel Propagation Simulator Panel
@@ -120,6 +121,22 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
             } else {
                 const maxElFrame = visibleFrames.reduce((a, b) => a.elevation > b.elevation ? a : b);
                 setStatusMsg('\u2705 ' + result.length + ' frames | Visible: ' + visibleFrames.length + ' | Max Elev: ' + maxElFrame.elevation.toFixed(1) + '\u00b0 @ ' + maxElFrame.timeLabel + ' | Peak SNR: ' + maxElFrame.snrDb.toFixed(1) + ' dB');
+
+                // === Validation Module Call ===
+                try {
+                    const validator = new SimulationValidator({
+                        frequency: freq * 1e9,
+                        distance: maxElFrame.slantRange,
+                        eirp_dBW: eirp,
+                        rxGain_dBi: gRx,
+                        rxPower_dBm: maxElFrame.rxPowerDbm,
+                        snrTimeSeries: visibleFrames.map(f => f.snrDb)
+                    });
+                    validator.runAll();
+                } catch(e) {
+                    console.error("Simulation Validation Error:", e);
+                }
+                // ==============================
             }
             setComputing(false);
         }, 50);
