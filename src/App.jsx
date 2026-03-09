@@ -788,16 +788,16 @@ function App() {
               </div>
               {passData.length > 0 && (
                 <div style={{ marginTop: '8px', overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85em' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85em', color: '#ddd' }}>
                     <thead>
-                      <tr style={{ background: '#e9ecef', textAlign: 'left' }}>
-                        <th style={{ padding: '6px', border: '1px solid #dee2e6' }}>#</th>
-                        <th style={{ padding: '6px', border: '1px solid #dee2e6' }}>📡 AOS (Rise)</th>
-                        <th style={{ padding: '6px', border: '1px solid #dee2e6' }}>📡 TCA (Peak)</th>
-                        <th style={{ padding: '6px', border: '1px solid #dee2e6' }}>📡 LOS (Set)</th>
-                        <th style={{ padding: '6px', border: '1px solid #dee2e6' }}>Max Elev</th>
-                        <th style={{ padding: '6px', border: '1px solid #dee2e6' }}>Duration</th>
-                        <th style={{ padding: '6px', border: '1px solid #dee2e6' }}>Quality</th>
+                      <tr style={{ background: 'rgba(78,205,196,0.15)', textAlign: 'left', color: '#4ecdc4' }}>
+                        <th style={{ padding: '6px', border: '1px solid rgba(78,205,196,0.3)' }}>#</th>
+                        <th style={{ padding: '6px', border: '1px solid rgba(78,205,196,0.3)' }}>📡 AOS (Rise)</th>
+                        <th style={{ padding: '6px', border: '1px solid rgba(78,205,196,0.3)' }}>📡 TCA (Peak)</th>
+                        <th style={{ padding: '6px', border: '1px solid rgba(78,205,196,0.3)' }}>📡 LOS (Set)</th>
+                        <th style={{ padding: '6px', border: '1px solid rgba(78,205,196,0.3)' }}>Max Elev</th>
+                        <th style={{ padding: '6px', border: '1px solid rgba(78,205,196,0.3)' }}>Duration</th>
+                        <th style={{ padding: '6px', border: '1px solid rgba(78,205,196,0.3)' }}>Quality</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -806,20 +806,20 @@ function App() {
                         const mins = Math.floor(p.durationSec / 60);
                         const secs = Math.floor(p.durationSec % 60);
                         return (
-                          <tr key={i} style={{ background: i % 2 === 0 ? '#fff' : '#f8f9fa' }}>
-                            <td style={{ padding: '4px 6px', border: '1px solid #dee2e6' }}>{i + 1}</td>
-                            <td style={{ padding: '4px 6px', border: '1px solid #dee2e6', fontFamily: 'monospace' }}>{p.aos.toLocaleTimeString()}</td>
-                            <td style={{ padding: '4px 6px', border: '1px solid #dee2e6', fontFamily: 'monospace' }}>{p.tca.toLocaleTimeString()}</td>
-                            <td style={{ padding: '4px 6px', border: '1px solid #dee2e6', fontFamily: 'monospace' }}>{p.los.toLocaleTimeString()}</td>
-                            <td style={{ padding: '4px 6px', border: '1px solid #dee2e6', fontWeight: 'bold', color: p.maxElev >= 45 ? '#28a745' : p.maxElev >= 20 ? '#ffc107' : '#fd7e14' }}>{p.maxElev.toFixed(1)}°</td>
-                            <td style={{ padding: '4px 6px', border: '1px solid #dee2e6' }}>{mins}m {secs}s</td>
-                            <td style={{ padding: '4px 6px', border: '1px solid #dee2e6' }}>{quality}</td>
+                          <tr key={i} style={{ background: i % 2 === 0 ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.05)' }}>
+                            <td style={{ padding: '4px 6px', border: '1px solid rgba(78,205,196,0.3)' }}>{i + 1}</td>
+                            <td style={{ padding: '4px 6px', border: '1px solid rgba(78,205,196,0.3)', fontFamily: 'monospace' }}>{p.aos.toLocaleTimeString()}</td>
+                            <td style={{ padding: '4px 6px', border: '1px solid rgba(78,205,196,0.3)', fontFamily: 'monospace' }}>{p.tca.toLocaleTimeString()}</td>
+                            <td style={{ padding: '4px 6px', border: '1px solid rgba(78,205,196,0.3)', fontFamily: 'monospace' }}>{p.los.toLocaleTimeString()}</td>
+                            <td style={{ padding: '4px 6px', border: '1px solid rgba(78,205,196,0.3)', fontWeight: 'bold', color: p.maxElev >= 45 ? '#00ff88' : p.maxElev >= 20 ? '#ffc107' : '#fd7e14' }}>{p.maxElev.toFixed(1)}°</td>
+                            <td style={{ padding: '4px 6px', border: '1px solid rgba(78,205,196,0.3)' }}>{mins}m {secs}s</td>
+                            <td style={{ padding: '4px 6px', border: '1px solid rgba(78,205,196,0.3)' }}>{quality}</td>
                           </tr>
                         );
                       })}
                     </tbody>
                   </table>
-                  <small style={{ color: '#666' }}>🟢 Excellent (≥45°) | 🟡 Good (≥20°) | 🟠 Low (&lt;20°) — Found {passData.length} passes in next {passHours}h</small>
+                  <small style={{ color: '#aaa' }}>🟢 Excellent (≥45°) | 🟡 Good (≥20°) | 🟠 Low (&lt;20°) — Found {passData.length} passes in next {passHours}h</small>
                 </div>
               )}
               {passData.length === 0 && !passComputing && <small style={{ color: '#999', marginTop: '4px', display: 'block' }}>Click "Predict Passes" to scan future overflight windows.</small>}
