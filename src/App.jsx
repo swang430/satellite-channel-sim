@@ -684,7 +684,7 @@ function App() {
       </div>
       <p>Simulating Rain Fade & Depolarization (Ka-Band Example) with Data Calibration</p>
 
-      <div className="orbit-controls" style={{ padding: '15px', border: '1px solid #ccc', borderRadius: '5px', marginBottom: '20px', background: '#f9f9f9', textAlign: 'left' }}>
+      <div className="orbit-controls" style={{ padding: '15px', border: '1px solid rgba(78,205,196,0.5)', borderRadius: '5px', marginBottom: '20px', background: 'linear-gradient(135deg, #0a0a2e 0%, #1a1a3e 100%)', textAlign: 'left', color: '#eee' }}>
         <h3>🛰️ Satellite Orbit Configuration (SGP4)</h3>
         <label style={{ display: 'block', marginBottom: '10px', cursor: 'pointer' }}>
           <input type="checkbox" checked={isDynamicOrbit} onChange={e => setIsDynamicOrbit(e.target.checked)} />
@@ -693,7 +693,7 @@ function App() {
         {isDynamicOrbit && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {/* Ground Station Configuration */}
-            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', padding: '8px', background: '#e8f4fd', borderRadius: '4px', border: '1px solid #b8daff' }}>
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', padding: '8px', background: 'rgba(78,205,196,0.1)', borderRadius: '4px', border: '1px solid rgba(78,205,196,0.3)' }}>
               <strong>📍 Ground Station:</strong>
               <label>Lat:
                 <input type="number" step="0.01" value={syncLat} onChange={e => setSyncLat(parseFloat(e.target.value))} style={{ width: '75px', marginLeft: '4px', fontFamily: 'monospace' }} />
@@ -717,7 +717,7 @@ function App() {
               <select onChange={handlePresetChange} style={{ padding: '4px 8px', borderRadius: '4px', minWidth: '200px' }}>
                 {SAT_PRESETS.map((p, i) => <option key={i} value={i}>{p.label}</option>)}
               </select>
-              {satName && <span style={{ color: '#333', fontWeight: 'bold' }}>🛰️ {satName}</span>}
+              {satName && <span style={{ color: '#eee', fontWeight: 'bold' }}>🛰️ {satName}</span>}
             </div>
             {/* Milestone 19: NORAD ID + Fetch Button */}
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -758,14 +758,14 @@ function App() {
               <small style={{ color: '#666' }}>60s window, 1ms interval, starting from now (CSV)</small>
             </div>
             {orbitData && (
-              <div style={{ fontSize: '0.9em', color: '#0056b3', marginTop: '5px' }}>
+              <div style={{ fontSize: '0.9em', color: '#4ecdc4', marginTop: '5px' }}>
                 <strong>Live Tracking:</strong> Azimuth {orbitData.azimuth.toFixed(1)}° | Elevation {orbitData.elevation.toFixed(1)}° | Slant Range {orbitData.slantRange.toFixed(1)} km
               </div>
             )}
             <small style={{ color: '#888' }}>Ground Station coordinates are derived from the 'Live Sync Source' panel below.</small>
 
             {/* Milestone 21: Pass Prediction */}
-            <div style={{ marginTop: '10px', padding: '10px', border: '1px dashed #aaa', borderRadius: '5px', background: '#fff' }}>
+            <div style={{ marginTop: '10px', padding: '10px', border: '1px dashed rgba(78,205,196,0.5)', borderRadius: '5px', background: 'rgba(0,0,0,0.2)' }}>
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
                 <strong>📅 Pass Prediction</strong>
                 <label>Hours ahead:

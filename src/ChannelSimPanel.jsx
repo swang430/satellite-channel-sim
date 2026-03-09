@@ -164,6 +164,12 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
             };
         }).sort((a, b) => a.excessDelay_ns - b.excessDelay_ns);
 
+        // Normalize excessDelay_ns to start at 0
+        if (taps.length > 0) {
+            const minDelay = taps[0].excessDelay_ns;
+            taps.forEach(t => t.excessDelay_ns -= minDelay);
+        }
+
         // Use all taps
         const pLin = taps.map(t => Math.pow(10, t.amplitude_dB / 10));
         const sumP = pLin.reduce((a, b) => a + b, 0) || 1;
