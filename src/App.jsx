@@ -245,7 +245,7 @@ function App() {
   const ISS_TLE2 = '2 25544  51.6420 330.1245 0005273  19.5398  65.7335 15.49841804414341';
   const [tleLine1, setTleLine1] = useState(ISS_TLE1);
   const [tleLine2, setTleLine2] = useState(ISS_TLE2);
-  const [isDynamicOrbit, setIsDynamicOrbit] = useState(false);
+  const [isDynamicOrbit, setIsDynamicOrbit] = useState(true);
   const [showManual, setShowManual] = useState(false);
   const [orbitData, setOrbitData] = useState(null);
   const [passData, setPassData] = useState([]);
