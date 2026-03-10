@@ -164,9 +164,11 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
             };
         }).sort((a, b) => a.excessDelay_ns - b.excessDelay_ns);
 
+        let absoluteDelay_ns = 0;
         // Normalize excessDelay_ns to start at 0
         if (taps.length > 0) {
             const minDelay = taps[0].excessDelay_ns;
+            absoluteDelay_ns = minDelay;
             taps.forEach(t => t.excessDelay_ns -= minDelay);
         }
 
@@ -181,7 +183,8 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
         return {
             taps: taps.length ? taps : [{ excessDelay_ns: 0, amplitude_dB: 0, label: 'LOS' }],
             rmsDelaySpread_ns: safeNum(rms, 0),
-            coherenceBandwidth_MHz: safeNum(coherenceMHz, 0)
+            coherenceBandwidth_MHz: safeNum(coherenceMHz, 0),
+            absoluteDelay_ns: safeNum(absoluteDelay_ns, 0)
         };
     }
 
@@ -297,7 +300,7 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
         const frame = timeline[cirIdx];
         if (!frame || !frame.cir) return;
 
-        const { taps, rmsDelaySpread_ns, coherenceBandwidth_MHz } = frame.cir;
+        const { taps, rmsDelaySpread_ns, coherenceBandwidth_MHz, absoluteDelay_ns } = frame.cir;
         const maxExcessDelay = Math.max(1, ...taps.map(t => t.excessDelay_ns)) * 1.3;
         const losPower = taps[0].amplitude_dB;
         const minDb = -50;
@@ -381,12 +384,16 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
         ctx.fillStyle = '#fff';
         ctx.font = 'bold 12px sans-serif';
         ctx.textAlign = 'left';
-        ctx.fillText('CIR \u2014 |h(\u03c4)| Power Delay Profile', padL, 18);
+        let titleText = 'CIR \u2014 |h(\u03c4)| Power Delay Profile';
+        if (absoluteDelay_ns) {
+            titleText += ` (LOS Delay: ${(absoluteDelay_ns / 1e6).toFixed(4)} ms)`;
+        }
+        ctx.fillText(titleText, padL, 18);
 
         ctx.fillStyle = '#88ccff';
         ctx.font = '10px monospace';
         ctx.textAlign = 'right';
-        ctx.fillText('\u03c3_\u03c4 = ' + rmsDelaySpread_ns.toFixed(2) + ' ns | Bc = ' + coherenceBandwidth_MHz.toFixed(1) + ' MHz | El = ' + frame.elevation.toFixed(1) + '\u00b0', W - padR, 18);
+        ctx.fillText('DS(\u03c3_\u03c4) = ' + rmsDelaySpread_ns.toFixed(2) + ' ns | Bc = ' + coherenceBandwidth_MHz.toFixed(1) + ' MHz | El = ' + frame.elevation.toFixed(1) + '\u00b0', W - padR, 18);
 
     }, [timeline, cirIdx]);
 
