@@ -235,7 +235,7 @@ function App() {
   const [syncLat, setSyncLat] = useState(22.54);
   const [syncLon, setSyncLon] = useState(114.05);
   const [gsAlt, setGsAlt] = useState(0); // Ground Station altitude in meters
-  const [disableFastFading, setDisableFastFading] = useState(false);
+  const [disableFastFading, setDisableFastFading] = useState(true);
 
   const [replayData, setReplayData] = useState([]);
   const [replayIndex, setReplayIndex] = useState(0);
