@@ -86,21 +86,27 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
     }
 
     // === Generate Timeline ===
-    function handleGenerate() {
+    function handleGenerate(overridePass) {
         if (!tleLine1 || !tleLine2) {
             setStatusMsg('\u26a0\ufe0f Please load satellite TLE first');
             return;
         }
         setComputing(true);
         setStatusMsg('\u23f3 Generating channel time series...');
+        
+        const isEvent = overridePass && overridePass._reactName;
+        const targetPass = (overridePass && !isEvent) ? overridePass : selectedPass;
+
         setTimeout(() => {
             let startTime, endTime;
-            if (selectedPass) {
-                startTime = new Date(selectedPass.aos.getTime() - 2 * 60000);
-                endTime = new Date(selectedPass.los.getTime() + 2 * 60000);
+            let currentDuration = durationMin;
+            if (targetPass) {
+                startTime = new Date(targetPass.aos.getTime() - 2 * 60000);
+                endTime = new Date(targetPass.los.getTime() + 2 * 60000);
+                currentDuration = Math.ceil(targetPass.durationSec / 60) + 4;
             } else {
                 startTime = new Date();
-                endTime = new Date(startTime.getTime() + durationMin * 60 * 1000);
+                endTime = new Date(startTime.getTime() + currentDuration * 60 * 1000);
             }
             let linkParams = { freq, eirp, gRx, tRx, bandwidth, tec, env, rainRate, disableFastFading };
             if (useCalibration && calibProfile.calibrated) {
@@ -1093,7 +1099,8 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
                                     onClick={() => {
                                         setSelectedPass(p);
                                         setDurationMin(Math.ceil(p.durationSec / 60) + 4);
-                                        setStatusMsg('Selected pass #' + (i + 1) + ': ' + p.aos.toLocaleTimeString() + ' ~ ' + p.los.toLocaleTimeString() + ', max elev ' + p.maxElev.toFixed(1) + '\u00b0');
+                                        setStatusMsg('Selected pass #' + (i + 1) + ': ' + p.aos.toLocaleTimeString() + ' ~ ' + p.los.toLocaleTimeString() + ', max elev ' + p.maxElev.toFixed(1) + '\u00b0. Auto-generating...');
+                                        handleGenerate(p);
                                     }}
                                     style={{
                                         padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8em', fontFamily: 'monospace',
