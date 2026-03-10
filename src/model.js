@@ -862,6 +862,7 @@ export function computeCIR(params) {
     taps,
     rmsDelaySpread_ns,
     coherenceBandwidth_MHz,
+    absoluteDelay_ns: losDelay_ns,
     absoluteFspl,
     totalAtmLoss
   };

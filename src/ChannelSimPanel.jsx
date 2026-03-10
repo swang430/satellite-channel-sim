@@ -1126,6 +1126,16 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
                             >
                                 Clear
                             </button>
+                            {importInfo && (
+                                <>
+                                    <button onClick={exportCSV} style={{ ...btnExport, background: '#138496', color: '#fff', borderColor: '#117a8b' }}>
+                                        {'\ud83d\udce5'} Export CSV
+                                    </button>
+                                    <span style={{ fontSize: '0.85em', color: '#ccc', marginLeft: 'auto' }}>
+                                        <strong style={{ color: '#4ecdc4' }}>Freq:</strong> {freq} GHz | <strong style={{ color: '#4ecdc4' }}>EIRP:</strong> {eirp} dBW
+                                    </span>
+                                </>
+                            )}
                         </div>
 
                         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap' }}>
