@@ -445,7 +445,7 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
             for (let i = 0; i < maxTaps; i++) {
                 const tap = f.cir.taps[i];
                 if (tap) {
-                    base.push(tap.label, tap.excessDelay_ns.toFixed(3), tap.amplitude_dB.toFixed(3), tap.phase_rad.toFixed(4));
+                    base.push(tap.label, safeNum(tap.excessDelay_ns).toFixed(3), safeNum(tap.amplitude_dB).toFixed(3), safeNum(tap.phase_rad).toFixed(4));
                 } else {
                     base.push('', '', '', '');
                 }
