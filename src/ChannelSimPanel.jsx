@@ -414,7 +414,33 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
             headers += `,Tap${i}_Label,Tap${i}_ExcessDelay_ns,Tap${i}_Amplitude_dB,Tap${i}_Phase_rad`;
         }
         const rows = timeline.map(f => {
-            const base = [f.timeLabel, f.elevation.toFixed(2), f.azimuth.toFixed(1), f.slantRange.toFixed(1), f.absoluteFspl.toFixed(2), f.rxPowerDbm.toFixed(2), f.noiseFloorDbm.toFixed(2), f.snrDb.toFixed(2), f.attRain.toFixed(3), f.attGas.toFixed(3), f.attCloud.toFixed(3), f.totalAtmosphericLoss.toFixed(3), f.fadeLMS.toFixed(2), f.lossFaraday.toFixed(3), f.pointingLoss.toFixed(3), f.scintLoss.toFixed(3), f.tSky.toFixed(1), f.xpd.toFixed(2), f.capRank1.toFixed(3), f.capRank2.toFixed(3), f.groupDelayNs.toFixed(3), f.dispersionNs.toFixed(3), f.cir.taps.length, f.cir.rmsDelaySpread_ns.toFixed(3), f.cir.coherenceBandwidth_MHz.toFixed(3)];
+            const base = [
+                f.timeLabel,
+                safeNum(f.elevation).toFixed(2),
+                safeNum(f.azimuth).toFixed(1),
+                safeNum(f.slantRange).toFixed(1),
+                safeNum(f.absoluteFspl).toFixed(2),
+                safeNum(f.rxPowerDbm).toFixed(2),
+                safeNum(f.noiseFloorDbm).toFixed(2),
+                safeNum(f.snrDb).toFixed(2),
+                safeNum(f.attRain).toFixed(3),
+                safeNum(f.attGas).toFixed(3),
+                safeNum(f.attCloud).toFixed(3),
+                safeNum(f.totalAtmosphericLoss).toFixed(3),
+                safeNum(f.fadeLMS).toFixed(2),
+                safeNum(f.lossFaraday).toFixed(3),
+                safeNum(f.pointingLoss).toFixed(3),
+                safeNum(f.scintLoss).toFixed(3),
+                safeNum(f.tSky).toFixed(1),
+                safeNum(f.xpd).toFixed(2),
+                safeNum(f.capRank1).toFixed(3),
+                safeNum(f.capRank2).toFixed(3),
+                safeNum(f.groupDelayNs).toFixed(3),
+                safeNum(f.dispersionNs).toFixed(3),
+                f.cir.taps.length,
+                safeNum(f.cir.rmsDelaySpread_ns).toFixed(3),
+                safeNum(f.cir.coherenceBandwidth_MHz).toFixed(3)
+            ];
             // 逐 tap 输出详细数据
             for (let i = 0; i < maxTaps; i++) {
                 const tap = f.cir.taps[i];
@@ -443,14 +469,14 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
                 stepSec
             },
             frames: timeline.map(f => ({
-                time: f.time.toISOString(),
-                geometry: { elevation: f.elevation, azimuth: f.azimuth, slantRange: f.slantRange, apparentElevation: f.apparentElevation },
-                linkBudget: { absoluteFspl: f.absoluteFspl, rxPowerDbm: f.rxPowerDbm, noiseFloorDbm: f.noiseFloorDbm, snrDb: f.snrDb },
-                attenuation: { rain: f.attRain, gas: f.attGas, cloud: f.attCloud, atmospheric: f.totalAtmosphericLoss, fadeLMS: f.fadeLMS, faraday: f.lossFaraday, pointing: f.pointingLoss, scintillation: f.scintLoss },
-                noise: { tSky: f.tSky },
-                polarization: { xpd: f.xpd },
-                mimo: { capRank1: f.capRank1, capRank2: f.capRank2 },
-                ionosphere: { groupDelayNs: f.groupDelayNs, dispersionNs: f.dispersionNs },
+                time: f.time ? f.time.toISOString() : f.timeLabel,
+                geometry: { elevation: safeNum(f.elevation), azimuth: safeNum(f.azimuth), slantRange: safeNum(f.slantRange), apparentElevation: safeNum(f.apparentElevation) },
+                linkBudget: { absoluteFspl: safeNum(f.absoluteFspl), rxPowerDbm: safeNum(f.rxPowerDbm), noiseFloorDbm: safeNum(f.noiseFloorDbm), snrDb: safeNum(f.snrDb) },
+                attenuation: { rain: safeNum(f.attRain), gas: safeNum(f.attGas), cloud: safeNum(f.attCloud), atmospheric: safeNum(f.totalAtmosphericLoss), fadeLMS: safeNum(f.fadeLMS), faraday: safeNum(f.lossFaraday), pointing: safeNum(f.pointingLoss), scintillation: safeNum(f.scintLoss) },
+                noise: { tSky: safeNum(f.tSky) },
+                polarization: { xpd: safeNum(f.xpd) },
+                mimo: { capRank1: safeNum(f.capRank1), capRank2: safeNum(f.capRank2) },
+                ionosphere: { groupDelayNs: safeNum(f.groupDelayNs), dispersionNs: safeNum(f.dispersionNs) },
                 cir: f.cir
             }))
         }, null, 2);
