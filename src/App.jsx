@@ -882,7 +882,7 @@ function App() {
               </div>
 
               {/* Dual-axis Chart: Elevation + Total Loss vs Time */}
-              <div style={{ background: '#fff', borderRadius: '5px', padding: '10px' }}>
+              <div style={{ background: 'rgba(0,0,0,0.3)', borderRadius: '5px', padding: '10px' }}>
                 <Line
                   data={{
                     labels: replayTimeline.map(f => f.timeLabel),
@@ -908,7 +908,7 @@ function App() {
                       {
                         label: 'FSPL Δ (dB)',
                         data: replayTimeline.map(f => f.deltaFspl),
-                        borderColor: '#007bff',
+                        borderColor: '#00e5ff',
                         borderDash: [5, 3],
                         yAxisID: 'y2',
                         tension: 0.3,
@@ -919,11 +919,11 @@ function App() {
                   options={{
                     responsive: true,
                     interaction: { mode: 'index', intersect: false },
-                    plugins: { legend: { position: 'top' }, title: { display: true, text: '⏱️ Replay: Elevation & Channel Loss vs Time' } },
+                    plugins: { legend: { position: 'top', labels: { color: '#ccc', font: { size: 11 } } }, title: { display: true, text: '⏱️ Replay: Elevation & Channel Loss vs Time', color: '#fff', font: { size: 13 } } },
                     scales: {
-                      x: { display: true, title: { display: true, text: 'Time' }, ticks: { maxTicksLimit: 12 } },
-                      y1: { type: 'linear', position: 'left', title: { display: true, text: 'Elevation (°)' }, grid: { drawOnChartArea: false } },
-                      y2: { type: 'linear', position: 'right', title: { display: true, text: 'Loss (dB)' } }
+                      x: { display: true, title: { display: true, text: 'Time', color: '#ccc' }, ticks: { maxTicksLimit: 12, color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                      y1: { type: 'linear', position: 'left', title: { display: true, text: 'Elevation (°)', color: '#ccc' }, grid: { drawOnChartArea: false }, ticks: { color: '#aaa' } },
+                      y2: { type: 'linear', position: 'right', title: { display: true, text: 'Loss (dB)', color: '#ccc' }, grid: { color: 'rgba(255,255,255,0.08)' }, ticks: { color: '#aaa' } }
                     }
                   }}
                 />
