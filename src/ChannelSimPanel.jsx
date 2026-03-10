@@ -397,7 +397,8 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
         ctx.fillStyle = '#88ccff';
         ctx.font = '10px monospace';
         ctx.textAlign = 'right';
-        ctx.fillText('PathLoss = ' + frame.rxPowerDbm.toFixed(2) + ' dB | DS(\u03c3_\u03c4) = ' + rmsDelaySpread_ns.toFixed(2) + ' ns | Bc = ' + coherenceBandwidth_MHz.toFixed(1) + ' MHz | El = ' + frame.elevation.toFixed(1) + '\u00b0', W - padR, 18);
+        ctx.fillText('PathLoss: ' + frame.rxPowerDbm.toFixed(2) + ' dB | El: ' + frame.elevation.toFixed(1) + '\u00b0', W - padR, 15);
+        ctx.fillText('DS(\u03c3_\u03c4): ' + rmsDelaySpread_ns.toFixed(2) + ' ns | Bc: ' + coherenceBandwidth_MHz.toFixed(1) + ' MHz', W - padR, 29);
 
     }, [timeline, cirIdx]);
 
