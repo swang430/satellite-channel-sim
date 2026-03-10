@@ -243,13 +243,17 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
 
                 const cir = buildCirFromRays(rays);
                 const idx = frameIndexFromName(name);
+                
+                // Get path loss (ReceivedPower_COH or NONCOH)
+                const rxPower = safeNum(mat?.ReceivedPower_NONCOH?.[0], -150);
+                
                 frames.push({
                     timeLabel: `Imported frame ${idx}`,
                     elevation: 10,
                     azimuth: 0,
                     slantRange: 0,
-                    absoluteFspl: 0,
-                    rxPowerDbm: -80,
+                    absoluteFspl: -rxPower, // In imported mat, absoluteFspl will hold path loss
+                    rxPowerDbm: rxPower,
                     snrDb: 0,
                     noiseFloorDbm: -100,
                     tSky: 0,
@@ -393,7 +397,7 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
         ctx.fillStyle = '#88ccff';
         ctx.font = '10px monospace';
         ctx.textAlign = 'right';
-        ctx.fillText('DS(\u03c3_\u03c4) = ' + rmsDelaySpread_ns.toFixed(2) + ' ns | Bc = ' + coherenceBandwidth_MHz.toFixed(1) + ' MHz | El = ' + frame.elevation.toFixed(1) + '\u00b0', W - padR, 18);
+        ctx.fillText('PathLoss = ' + frame.rxPowerDbm.toFixed(2) + ' dB | DS(\u03c3_\u03c4) = ' + rmsDelaySpread_ns.toFixed(2) + ' ns | Bc = ' + coherenceBandwidth_MHz.toFixed(1) + ' MHz | El = ' + frame.elevation.toFixed(1) + '\u00b0', W - padR, 18);
 
     }, [timeline, cirIdx]);
 
