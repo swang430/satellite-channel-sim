@@ -2,9 +2,10 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Line, Bar } from 'react-chartjs-2';
 import JSZip from 'jszip';
 import { read as readMat } from 'mat-for-js';
-import { generateChannelTimeSeries, predictPasses, calibrateModel, applyCalibration, createDefaultCalibration, getCalibParamDefs } from './model.js';
+import { generateChannelTimeSeries, generateTrajectoryExport, predictPasses, calibrateModel, applyCalibration, createDefaultCalibration, getCalibParamDefs } from './model.js';
 import { getSatelliteList, getSatelliteBandParams } from './knownSatellites.js';
 import { SimulationValidator } from './ValidationModule.js';
+import { parseTrajectoryCsv } from './projectSync.js';
 
 /**
  * Channel Propagation Simulator Panel
@@ -12,11 +13,21 @@ import { SimulationValidator } from './ValidationModule.js';
  * Input: Satellite TLE + Ground Station + Time Window + Link Params
  * Output: Rx Power / SNR / CIR time series + CSV/JSON export
  */
-export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalParams }) {
+export default function ChannelSimPanel({
+    tleLine1,
+    tleLine2,
+    satName,
+    globalParams,
+    groundStation,
+    onGroundStationChange,
+    activeProjectManifest,
+    requestedCirIndex,
+    onCirSyncStateChange
+}) {
     // === Ground Station Config ===
-    const [gsLat, setGsLat] = useState(22.54);
-    const [gsLon, setGsLon] = useState(114.05);
-    const [gsAlt, setGsAlt] = useState(0);
+    const [gsLat, setGsLat] = useState(groundStation?.lat ?? 22.54);
+    const [gsLon, setGsLon] = useState(groundStation?.lon ?? 114.05);
+    const [gsAlt, setGsAlt] = useState(groundStation?.alt ?? 0);
 
     // === Time Config ===
     const [durationMin, setDurationMin] = useState(30);
@@ -45,9 +56,16 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
 
     // === Output State ===
     const [timeline, setTimeline] = useState([]);
+    const [generatedTimeline, setGeneratedTimeline] = useState([]);
+    const [generatedTrajectorySamples, setGeneratedTrajectorySamples] = useState([]);
     const [computing, setComputing] = useState(false);
     const [cirIdx, setCirIdx] = useState(0);
     const [statusMsg, setStatusMsg] = useState('');
+    const [isStandaloneMode, setIsStandaloneMode] = useState(false);
+    const [linkedTrajectorySamples, setLinkedTrajectorySamples] = useState([]);
+    const [handshakeInfo, setHandshakeInfo] = useState(null);
+    const [linkedViewerTle, setLinkedViewerTle] = useState({ tleLine1: '', tleLine2: '' });
+    const [linkedGroundStation, setLinkedGroundStation] = useState(null);
 
     // === External CIR Import (ZIP of .mat frames) ===
     const [importInfo, setImportInfo] = useState(null);
@@ -60,6 +78,17 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
     const [searchingPass, setSearchingPass] = useState(false);
 
     const cirCanvasRef = useRef(null);
+    const hasGroundStationProp = groundStation != null;
+    const groundStationLat = groundStation?.lat;
+    const groundStationLon = groundStation?.lon;
+    const groundStationAlt = groundStation?.alt;
+
+    useEffect(() => {
+        if (!hasGroundStationProp) return;
+        if (groundStationLat != null) setGsLat(groundStationLat);
+        if (groundStationLon != null) setGsLon(groundStationLon);
+        if (groundStationAlt != null) setGsAlt(groundStationAlt);
+    }, [hasGroundStationProp, groundStationLat, groundStationLon, groundStationAlt]);
 
     // === Find Next Pass ===
     function handleFindPass() {
@@ -118,8 +147,17 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
                 startTime, endTime, stepSec,
                 linkParams
             );
+            const trajectorySamples = buildTrajectorySamplesFromTimeline(result);
+            setGeneratedTimeline(result);
+            setGeneratedTrajectorySamples(trajectorySamples);
             setTimeline(result);
             setImportInfo(null);
+            setIsStandaloneMode(false);
+            setLinkedTrajectorySamples([]);
+            setHandshakeInfo(null);
+            setLinkedViewerTle({ tleLine1: '', tleLine2: '' });
+            setLinkedGroundStation(null);
+            setIsCirPlaying(false);
             setCirIdx(0);
             const visibleFrames = result.filter(f => f.elevation > 0);
             if (visibleFrames.length === 0) {
@@ -152,6 +190,148 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
         if (typeof x === 'number' && Number.isFinite(x)) return x;
         if (typeof x === 'bigint') return Number(x);
         return fallback;
+    }
+
+    function updateGroundStation(nextGroundStation) {
+        setGsLat(nextGroundStation.lat);
+        setGsLon(nextGroundStation.lon);
+        setGsAlt(nextGroundStation.alt);
+        onGroundStationChange?.(nextGroundStation);
+    }
+
+    function updateGsLat(value) {
+        const next = { lat: Number.isFinite(value) ? value : gsLat, lon: gsLon, alt: gsAlt };
+        updateGroundStation(next);
+    }
+
+    function updateGsLon(value) {
+        const next = { lat: gsLat, lon: Number.isFinite(value) ? value : gsLon, alt: gsAlt };
+        updateGroundStation(next);
+    }
+
+    function updateGsAlt(value) {
+        const next = { lat: gsLat, lon: gsLon, alt: Number.isFinite(value) ? value : gsAlt };
+        updateGroundStation(next);
+    }
+
+    function formatFrameTimeLabel(value, fallback = '') {
+        if (!value) return fallback;
+        const date = value instanceof Date ? value : new Date(value);
+        if (Number.isNaN(date.getTime())) return fallback || String(value);
+        return date.toLocaleTimeString();
+    }
+
+    function buildTrajectorySamplesFromTimeline(sourceTimeline) {
+        return (sourceTimeline || []).map((frame, index) => ({
+            index,
+            lat: safeNum(frame.satLat, 0),
+            lon: safeNum(frame.satLon, 0),
+            alt: safeNum(frame.satAlt, 0),
+            azimuth: safeNum(frame.azimuth, 0),
+            elevation: safeNum(frame.elevation, 0),
+            slantRange: safeNum(frame.slantRange, 0),
+            time: frame.time instanceof Date ? frame.time.toISOString() : (frame.time || ''),
+            timeLabel: frame.timeLabel || formatFrameTimeLabel(frame.time, `Frame ${index + 1}`)
+        })).filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lon));
+    }
+
+    function buildTrajectorySamplesFromCsv(csvText) {
+        return parseTrajectoryCsv(csvText).map((point, index) => ({
+            index,
+            lat: safeNum(point.satLat, 0),
+            lon: safeNum(point.satLon, 0),
+            alt: safeNum(point.satAlt, 0),
+            azimuth: safeNum(point.azimuth, 0),
+            elevation: safeNum(point.elevation, 0),
+            slantRange: safeNum(point.slantRange, 0),
+            time: point.time || '',
+            timeLabel: formatFrameTimeLabel(point.time, `Frame ${index + 1}`)
+        }));
+    }
+
+    function getZipEntry(zip, entryName) {
+        return Object.values(zip.files).find((file) => !file.dir && file.name.split('/').pop().toLowerCase() === entryName.toLowerCase()) || null;
+    }
+
+    function getManifestGroundStation(manifest) {
+        if (!manifest?.groundStation) return null;
+        return {
+            lat: safeNum(manifest.groundStation.lat, gsLat),
+            lon: safeNum(manifest.groundStation.lon, gsLon),
+            alt: safeNum(manifest.groundStation.alt, gsAlt)
+        };
+    }
+
+    function buildTrajectorySamplesFromManifest(manifest) {
+        if (!manifest?.trajectory) return [];
+        const resolvedTleLine1 = manifest?.satellite?.tleLine1 || activeProjectManifest?.satellite?.tleLine1 || tleLine1;
+        const resolvedTleLine2 = manifest?.satellite?.tleLine2 || activeProjectManifest?.satellite?.tleLine2 || tleLine2;
+        if (!resolvedTleLine1 || !resolvedTleLine2) return [];
+
+        const manifestGroundStation = getManifestGroundStation(manifest) || getManifestGroundStation(activeProjectManifest) || { lat: gsLat, lon: gsLon, alt: gsAlt };
+        const startTime = manifest.trajectory.startTime ? new Date(manifest.trajectory.startTime) : new Date();
+        const stepMs = safeNum(manifest.trajectory.stepMs, 0);
+        const sampleCount = Math.max(0, Math.floor(safeNum(manifest.trajectory.sampleCount, 0)));
+        const durationMs = manifest.trajectory.durationMs != null
+            ? safeNum(manifest.trajectory.durationMs, 0)
+            : (sampleCount > 0 ? Math.max(0, (sampleCount - 1) * stepMs) : 0);
+
+        if (!sampleCount || stepMs <= 0) return [];
+
+        const exportPoints = generateTrajectoryExport(
+            resolvedTleLine1,
+            resolvedTleLine2,
+            manifestGroundStation.lat,
+            manifestGroundStation.lon,
+            manifestGroundStation.alt,
+            { startTime, durationMs, stepMs }
+        );
+        const trajectorySamples = exportPoints.map((point, index) => ({
+            index,
+            lat: safeNum(point.satLat, 0),
+            lon: safeNum(point.satLon, 0),
+            alt: safeNum(point.satAlt, 0),
+            azimuth: safeNum(point.azimuth, 0),
+            elevation: safeNum(point.elevation, 0),
+            slantRange: safeNum(point.range, 0),
+            time: point.time || '',
+            timeLabel: formatFrameTimeLabel(point.time, `Frame ${index + 1}`)
+        }));
+
+        return trajectorySamples.length === sampleCount ? trajectorySamples : [];
+    }
+
+    function applyTrajectoryToFrame(frame, sample, index) {
+        if (!sample) return frame;
+        return {
+            ...frame,
+            frameIndex: index,
+            time: sample.time ? new Date(sample.time) : frame.time,
+            timeLabel: sample.timeLabel || frame.timeLabel,
+            elevation: safeNum(sample.elevation, frame.elevation),
+            azimuth: safeNum(sample.azimuth, frame.azimuth),
+            slantRange: safeNum(sample.slantRange, frame.slantRange),
+            satLat: safeNum(sample.lat, frame.satLat),
+            satLon: safeNum(sample.lon, frame.satLon),
+            satAlt: safeNum(sample.alt, frame.satAlt)
+        };
+    }
+
+    function describeHandshakeSource(source) {
+        switch (source) {
+            case 'task-id':
+                return 'Task_ID';
+            case 'trajectory-csv':
+                return 'trajectory.csv';
+            case 'frame-count':
+                return 'frame count';
+            case 'manifest':
+                return 'manifest';
+            case 'active-project':
+                return 'active project';
+            default:
+                return source || 'standalone';
+        }
     }
 
     function buildCirFromRays(rays) {
@@ -201,6 +381,8 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
         try {
             const ab = await file.arrayBuffer();
             const zip = await JSZip.loadAsync(ab);
+            const manifestEntry = getZipEntry(zip, 'manifest.json');
+            const trajectoryEntry = getZipEntry(zip, 'trajectory.csv');
             const entries = Object.keys(zip.files)
                 .filter(name => name.toLowerCase().endsWith('.mat') && !zip.files[name].dir);
 
@@ -217,6 +399,28 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
             }
 
             entries.sort((a, b) => frameIndexFromName(a) - frameIndexFromName(b));
+
+            let importedManifest = null;
+            if (manifestEntry) {
+                try {
+                    importedManifest = JSON.parse(await manifestEntry.async('string'));
+                } catch (err) {
+                    console.warn('Failed to parse manifest.json from CIR ZIP:', err);
+                }
+            }
+
+            if (importedManifest?.groundStation) {
+                updateGroundStation(getManifestGroundStation(importedManifest));
+            }
+
+            let zipTrajectorySamples = [];
+            if (trajectoryEntry) {
+                try {
+                    zipTrajectorySamples = buildTrajectorySamplesFromCsv(await trajectoryEntry.async('string'));
+                } catch (err) {
+                    console.warn('Failed to parse trajectory.csv from CIR ZIP:', err);
+                }
+            }
 
             const frames = [];
             for (let i = 0; i < entries.length; i++) {
@@ -254,6 +458,8 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
                 const rxPower = safeNum(mat?.ReceivedPower_NONCOH?.[0], -150);
                 
                 frames.push({
+                    frameIndex: i,
+                    importedFrameId: idx,
                     timeLabel: `Imported frame ${idx}`,
                     elevation: 10,
                     azimuth: 0,
@@ -262,19 +468,109 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
                     rxPowerDbm: rxPower,
                     snrDb: 0,
                     noiseFloorDbm: -100,
+                    attRain: 0,
+                    attGas: 0,
+                    attCloud: 0,
+                    totalAtmosphericLoss: 0,
+                    fadeLMS: 0,
+                    lossFaraday: 0,
+                    pointingLoss: 0,
+                    scanLoss: 0,
+                    multipathLoss: 0,
+                    scintLoss: 0,
                     tSky: 0,
                     xpd: 0,
+                    capRank1: 0,
                     capRank2: 0,
                     groupDelayNs: cir.taps[0].excessDelay_ns,
                     dispersionNs: cir.rmsDelaySpread_ns,
+                    satLat: 0,
+                    satLon: 0,
+                    satAlt: 0,
                     cir
                 });
             }
 
-            setTimeline(frames);
-            setImportInfo({ name: file.name, frames: frames.length });
+            let handshakeSource = '';
+            let handshakeSamples = [];
+            let handshakeManifest = null;
+            let handshakeTle = { tleLine1: '', tleLine2: '' };
+            let handshakeGroundStation = null;
+
+            const activeManifestMatchesFrameCount = activeProjectManifest?.trajectory?.sampleCount === frames.length;
+            const taskIdMatches = importedManifest?.Task_ID && activeProjectManifest?.Task_ID && importedManifest.Task_ID === activeProjectManifest.Task_ID;
+
+            if (zipTrajectorySamples.length === frames.length) {
+                handshakeSource = 'trajectory-csv';
+                handshakeSamples = zipTrajectorySamples;
+                handshakeManifest = importedManifest || activeProjectManifest || null;
+            } else if (generatedTrajectorySamples.length === frames.length) {
+                handshakeSource = 'frame-count';
+                handshakeSamples = generatedTrajectorySamples;
+                handshakeManifest = importedManifest || null;
+            } else {
+                const manifestCandidate = taskIdMatches
+                    ? (importedManifest || activeProjectManifest)
+                    : (importedManifest || (activeManifestMatchesFrameCount ? activeProjectManifest : null));
+                if (manifestCandidate) {
+                    const manifestSamples = buildTrajectorySamplesFromManifest(manifestCandidate);
+                    if (manifestSamples.length === frames.length) {
+                        handshakeSource = taskIdMatches ? 'task-id' : (manifestCandidate === activeProjectManifest ? 'active-project' : 'manifest');
+                        handshakeSamples = manifestSamples;
+                        handshakeManifest = manifestCandidate;
+                    }
+                }
+            }
+
+            if (handshakeSamples.length === frames.length) {
+                handshakeTle = {
+                    tleLine1: handshakeManifest?.satellite?.tleLine1 || activeProjectManifest?.satellite?.tleLine1 || tleLine1 || '',
+                    tleLine2: handshakeManifest?.satellite?.tleLine2 || activeProjectManifest?.satellite?.tleLine2 || tleLine2 || ''
+                };
+                handshakeGroundStation = getManifestGroundStation(handshakeManifest)
+                    || getManifestGroundStation(activeProjectManifest)
+                    || { lat: gsLat, lon: gsLon, alt: gsAlt };
+            }
+
+            const linkedFrames = handshakeSamples.length === frames.length
+                ? frames.map((frame, index) => applyTrajectoryToFrame(frame, handshakeSamples[index], index))
+                : frames;
+
+            setTimeline(linkedFrames);
+            setIsCirPlaying(false);
             setCirIdx(0);
-            setStatusMsg(`\u2705 Imported ${frames.length} frames from ${file.name}. Use Play to view over time.`);
+            setImportInfo({
+                name: file.name,
+                frames: frames.length,
+                hasManifest: Boolean(importedManifest),
+                standalone: handshakeSamples.length !== frames.length,
+                handshakeSource,
+                taskId: importedManifest?.Task_ID || handshakeManifest?.Task_ID || null
+            });
+
+            if (handshakeSamples.length === frames.length) {
+                setIsStandaloneMode(false);
+                setLinkedTrajectorySamples(handshakeSamples);
+                setHandshakeInfo({
+                    linked: true,
+                    source: handshakeSource,
+                    taskId: importedManifest?.Task_ID || handshakeManifest?.Task_ID || null
+                });
+                setLinkedViewerTle(handshakeTle);
+                setLinkedGroundStation(handshakeGroundStation);
+                setStatusMsg(`\u2705 Imported ${frames.length} CIR frames from ${file.name} and linked them via ${describeHandshakeSource(handshakeSource)}. Click the highlighted trajectory samples to jump frames.`);
+            } else {
+                setIsStandaloneMode(true);
+                setLinkedTrajectorySamples([]);
+                setHandshakeInfo({
+                    linked: false,
+                    source: 'standalone',
+                    taskId: importedManifest?.Task_ID || null
+                });
+                setLinkedViewerTle({ tleLine1: '', tleLine2: '' });
+                setLinkedGroundStation(null);
+                setStatusMsg(`\u2705 Imported ${frames.length} CIR frames from ${file.name} in standalone viewer mode. Skyplot and trajectory views are hidden until a project handshake is available.`);
+            }
         } catch (e) {
             console.error(e);
             setStatusMsg('\u26a0\ufe0f Import failed: ' + (e?.message || String(e)));
@@ -296,6 +592,48 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
         }, intervalMs);
         return () => clearInterval(timer);
     }, [isCirPlaying, cirFps, timeline.length]);
+
+    useEffect(() => {
+        if (timeline.length === 0) {
+            if (cirIdx !== 0) setCirIdx(0);
+            return;
+        }
+        if (cirIdx >= timeline.length) {
+            setCirIdx(timeline.length - 1);
+        }
+    }, [timeline.length, cirIdx]);
+
+    useEffect(() => {
+        if (!Number.isInteger(requestedCirIndex)) return;
+        if (requestedCirIndex < 0 || requestedCirIndex >= timeline.length) return;
+        if (requestedCirIndex === cirIdx) return;
+        setIsCirPlaying(false);
+        setCirIdx(requestedCirIndex);
+    }, [requestedCirIndex, timeline.length, cirIdx]);
+
+    useEffect(() => {
+        onCirSyncStateChange?.({
+            isStandaloneMode,
+            activeIndex: timeline.length ? cirIdx : 0,
+            samplePoints: linkedTrajectorySamples,
+            handshake: handshakeInfo,
+            importInfo,
+            tleLine1: linkedViewerTle.tleLine1,
+            tleLine2: linkedViewerTle.tleLine2,
+            groundStation: linkedGroundStation
+        });
+    }, [
+        isStandaloneMode,
+        cirIdx,
+        timeline.length,
+        linkedTrajectorySamples,
+        handshakeInfo,
+        importInfo,
+        linkedViewerTle.tleLine1,
+        linkedViewerTle.tleLine2,
+        linkedGroundStation,
+        onCirSyncStateChange
+    ]);
 
     // === CIR Canvas ===
     useEffect(() => {
@@ -499,7 +837,28 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
         URL.revokeObjectURL(url);
     }
 
+    function handleClearImportedCir() {
+        setIsCirPlaying(false);
+        setImportInfo(null);
+        setIsStandaloneMode(false);
+        setLinkedTrajectorySamples([]);
+        setHandshakeInfo(null);
+        setLinkedViewerTle({ tleLine1: '', tleLine2: '' });
+        setLinkedGroundStation(null);
+        if (generatedTimeline.length > 0) {
+            setTimeline(generatedTimeline);
+            setCirIdx(Math.min(cirIdx, Math.max(0, generatedTimeline.length - 1)));
+            setStatusMsg('Cleared imported CIR and restored the generated channel timeline.');
+        } else {
+            setTimeline([]);
+            setCirIdx(0);
+            setStatusMsg('Cleared imported CIR.');
+        }
+    }
+
     // === Chart Data ===
+    const isImportedTimeline = Boolean(importInfo);
+    const showAnalyticsPanels = timeline.length > 0 && !isImportedTimeline;
     const chartLabels = timeline.map(f => f.timeLabel);
 
     const rxSnrChartData = {
@@ -639,13 +998,13 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
                     <div style={{ ...inputGroupStyle, padding: '8px', background: 'rgba(78,205,196,0.1)', borderRadius: '5px', border: '1px solid rgba(78,205,196,0.3)' }}>
                         <strong style={{ fontSize: '0.9em' }}>{'\ud83d\udccd'} Ground Station</strong>
                         <label style={labelStyle}>Lat:
-                            <input type="number" step="0.01" value={gsLat} onChange={e => setGsLat(parseFloat(e.target.value))} style={inputStyle} />
+                            <input type="number" step="0.01" value={gsLat} onChange={e => updateGsLat(parseFloat(e.target.value))} style={inputStyle} />
                         </label>
                         <label style={labelStyle}>Lon:
-                            <input type="number" step="0.01" value={gsLon} onChange={e => setGsLon(parseFloat(e.target.value))} style={inputStyle} />
+                            <input type="number" step="0.01" value={gsLon} onChange={e => updateGsLon(parseFloat(e.target.value))} style={inputStyle} />
                         </label>
                         <label style={labelStyle}>Alt(m):
-                            <input type="number" step="1" value={gsAlt} onChange={e => setGsAlt(parseFloat(e.target.value) || 0)} style={{ ...inputStyle, width: '60px' }} />
+                            <input type="number" step="1" value={gsAlt} onChange={e => updateGsAlt(parseFloat(e.target.value) || 0)} style={{ ...inputStyle, width: '60px' }} />
                         </label>
                     </div>
                     <div style={{ ...inputGroupStyle, marginTop: '8px' }}>
@@ -808,9 +1167,13 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
                                                         // 地面站校验
                                                         if (meta.groundStation) {
                                                             const gs = meta.groundStation;
-                                                            if (gs.lat != null) setGsLat(gs.lat);
-                                                            if (gs.lon != null) setGsLon(gs.lon);
-                                                            if (gs.alt != null) setGsAlt(gs.alt);
+                                                            if (gs.lat != null || gs.lon != null || gs.alt != null) {
+                                                                updateGroundStation({
+                                                                    lat: gs.lat != null ? gs.lat : gsLat,
+                                                                    lon: gs.lon != null ? gs.lon : gsLon,
+                                                                    alt: gs.alt != null ? gs.alt : gsAlt
+                                                                });
+                                                            }
                                                             if (gs.lat != null && gs.lon != null) {
                                                                 statusParts.push(`📍 地面站 (${gs.lat}, ${gs.lon})`);
                                                             } else {
@@ -1131,46 +1494,79 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
                 </div>
             )}
 
+            <div style={{ background: 'rgba(0,0,0,0.3)', borderRadius: '6px', padding: '12px', marginBottom: timeline.length > 0 ? '15px' : 0 }}>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', marginBottom: timeline.length > 0 ? '10px' : 0 }}>
+                    <strong style={{ fontSize: '0.9em' }}>Import CIR:</strong>
+                    <input
+                        type="file"
+                        accept=".zip"
+                        onChange={e => handleImportCirZip(e.target.files?.[0])}
+                        style={{ maxWidth: '320px' }}
+                    />
+                    {importInfo && (
+                        <span style={{ fontFamily: 'monospace', fontSize: '0.85em', color: '#88ccff' }}>
+                            Loaded: {importInfo.name} ({importInfo.frames} frames)
+                        </span>
+                    )}
+                    {importInfo && (
+                        <span style={{
+                            fontSize: '0.78em',
+                            padding: '2px 8px',
+                            borderRadius: '999px',
+                            background: isStandaloneMode ? 'rgba(255,107,107,0.14)' : 'rgba(255,214,10,0.16)',
+                            border: isStandaloneMode ? '1px solid rgba(255,107,107,0.35)' : '1px solid rgba(255,214,10,0.35)',
+                            color: isStandaloneMode ? '#ffb3b3' : '#ffd60a'
+                        }}>
+                            {isStandaloneMode ? 'Standalone CIR Viewer' : `Linked via ${describeHandshakeSource(importInfo.handshakeSource)}`}
+                        </span>
+                    )}
+                    <button
+                        onClick={handleClearImportedCir}
+                        style={{ padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', background: '#2c3e50', color: '#eee', border: '1px solid #555' }}
+                    >
+                        Clear
+                    </button>
+                    {importInfo && (
+                        <>
+                            <button onClick={exportCSV} style={{ ...btnExport, background: '#138496', color: '#fff', borderColor: '#117a8b' }}>
+                                {'\ud83d\udce5'} Export CSV
+                            </button>
+                            {importInfo.taskId && (
+                                <span style={{ fontSize: '0.8em', color: '#ffd60a', fontFamily: 'monospace' }}>
+                                    Task_ID: {importInfo.taskId.slice(0, 8)}...
+                                </span>
+                            )}
+                            {!isStandaloneMode && (
+                                <span style={{ fontSize: '0.85em', color: '#ccc', marginLeft: 'auto' }}>
+                                    Click a highlighted point in the trajectory view to jump this CIR frame.
+                                </span>
+                            )}
+                        </>
+                    )}
+                </div>
+
+                {timeline.length === 0 && (
+                    <div style={{ fontSize: '0.85em', color: '#aaa' }}>
+                        Import a CIR ZIP to open the viewer, or generate a channel timeline to simulate and export locally.
+                    </div>
+                )}
+            </div>
+
             {/* === Output Area === */}
             {timeline.length > 0 && (
                 <>
-                    <div style={{ background: 'rgba(0,0,0,0.3)', borderRadius: '6px', padding: '12px', marginBottom: '15px' }}>
-                        <Line data={rxSnrChartData} options={rxSnrChartOpts} />
-                    </div>
-
-                    <div style={{ background: 'rgba(0,0,0,0.3)', borderRadius: '6px', padding: '12px', marginBottom: '15px' }}>
-                        {/* Import ZIP of .mat frames */}
-                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '10px' }}>
-                            <strong style={{ fontSize: '0.9em' }}>Import CIR:</strong>
-                            <input
-                                type="file"
-                                accept=".zip"
-                                onChange={e => handleImportCirZip(e.target.files?.[0])}
-                                style={{ maxWidth: '320px' }}
-                            />
-                            {importInfo && (
-                                <span style={{ fontFamily: 'monospace', fontSize: '0.85em', color: '#88ccff' }}>
-                                    Loaded: {importInfo.name} ({importInfo.frames} frames)
-                                </span>
-                            )}
-                            <button
-                                onClick={() => { setTimeline([]); setImportInfo(null); setIsCirPlaying(false); setStatusMsg('Cleared imported CIR'); }}
-                                style={{ padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', background: '#2c3e50', color: '#eee', border: '1px solid #555' }}
-                            >
-                                Clear
-                            </button>
-                            {importInfo && (
-                                <>
-                                    <button onClick={exportCSV} style={{ ...btnExport, background: '#138496', color: '#fff', borderColor: '#117a8b' }}>
-                                        {'\ud83d\udce5'} Export CSV
-                                    </button>
-                                    <span style={{ fontSize: '0.85em', color: '#ccc', marginLeft: 'auto' }}>
-                                        <strong style={{ color: '#4ecdc4' }}>Freq:</strong> {freq} GHz | <strong style={{ color: '#4ecdc4' }}>EIRP:</strong> {eirp} dBW
-                                    </span>
-                                </>
-                            )}
+                    {showAnalyticsPanels && (
+                        <div style={{ background: 'rgba(0,0,0,0.3)', borderRadius: '6px', padding: '12px', marginBottom: '15px' }}>
+                            <Line data={rxSnrChartData} options={rxSnrChartOpts} />
                         </div>
+                    )}
 
+                    <div style={{ background: 'rgba(0,0,0,0.3)', borderRadius: '6px', padding: '12px', marginBottom: showAnalyticsPanels ? '15px' : 0 }}>
+                        {isStandaloneMode && (
+                            <div style={{ marginBottom: '8px', fontSize: '0.82em', color: '#ffb3b3' }}>
+                                Standalone CIR Viewer Mode: trajectory and skyplot linkage are unavailable for this import.
+                            </div>
+                        )}
                         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap' }}>
                             <strong style={{ fontSize: '0.9em' }}>CIR Frame:</strong>
                             <button
@@ -1200,51 +1596,53 @@ export default function ChannelSimPanel({ tleLine1, tleLine2, satName, globalPar
                         <canvas ref={cirCanvasRef} width={700} height={280} style={{ width: '100%', borderRadius: '4px' }} />
                     </div>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
-                        {attBreakdownData && (
-                            <div style={{ background: 'rgba(0,0,0,0.3)', borderRadius: '6px', padding: '12px' }}>
-                                <Bar data={attBreakdownData} options={{
-                                    responsive: true,
-                                    plugins: {
-                                        legend: { display: false },
-                                        title: { display: true, text: 'Loss Breakdown @ ' + (currentFrame?.timeLabel || ''), color: '#fff', font: { size: 12 } }
-                                    },
-                                    scales: {
-                                        x: { ticks: { color: '#aaa', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.05)' } },
-                                        y: { title: { display: true, text: 'dB', color: '#ccc' }, ticks: { color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.08)' } }
-                                    }
-                                }} />
-                            </div>
-                        )}
+                    {showAnalyticsPanels && (
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+                            {attBreakdownData && (
+                                <div style={{ background: 'rgba(0,0,0,0.3)', borderRadius: '6px', padding: '12px' }}>
+                                    <Bar data={attBreakdownData} options={{
+                                        responsive: true,
+                                        plugins: {
+                                            legend: { display: false },
+                                            title: { display: true, text: 'Loss Breakdown @ ' + (currentFrame?.timeLabel || ''), color: '#fff', font: { size: 12 } }
+                                        },
+                                        scales: {
+                                            x: { ticks: { color: '#aaa', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                                            y: { title: { display: true, text: 'dB', color: '#ccc' }, ticks: { color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.08)' } }
+                                        }
+                                    }} />
+                                </div>
+                            )}
 
-                        {currentFrame && (
-                            <div style={{ background: 'rgba(0,0,0,0.3)', borderRadius: '6px', padding: '12px', fontSize: '0.88em' }}>
-                                <h4 style={{ margin: '0 0 8px 0', color: currentFrame.elevation > 0 ? '#4ecdc4' : '#ff6b6b' }}>
-                                    {currentFrame.elevation > 0 ? '\u2705' : '\u26a0\ufe0f'} Frame Details {currentFrame.elevation <= 0 ? '(Below Horizon)' : ''}
-                                </h4>
-                                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                                    <tbody>
-                                        {[
-                                            ['Elevation', currentFrame.elevation.toFixed(2) + '\u00b0', 'Azimuth', currentFrame.azimuth.toFixed(1) + '\u00b0'],
-                                            ['Range', currentFrame.slantRange.toFixed(1) + ' km', 'FSPL', currentFrame.absoluteFspl.toFixed(2) + ' dB'],
-                                            ['Rx Power', currentFrame.rxPowerDbm.toFixed(2) + ' dBm', 'SNR', currentFrame.snrDb.toFixed(2) + ' dB'],
-                                            ['Noise Floor', currentFrame.noiseFloorDbm.toFixed(2) + ' dBm', 'T_sky', currentFrame.tSky.toFixed(1) + ' K'],
-                                            ['XPD', currentFrame.xpd.toFixed(2) + ' dB', 'MIMO R2', currentFrame.capRank2.toFixed(2) + ' bps/Hz'],
-                                            ['Group Delay', currentFrame.groupDelayNs.toFixed(2) + ' ns', 'Dispersion', currentFrame.dispersionNs.toFixed(3) + ' ns'],
-                                            ['\u03c3_\u03c4', currentFrame.cir.rmsDelaySpread_ns.toFixed(2) + ' ns', 'Bc', currentFrame.cir.coherenceBandwidth_MHz.toFixed(1) + ' MHz'],
-                                        ].map((row, i) => (
-                                            <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                                                <td style={{ padding: '3px 6px', color: '#aaa' }}>{row[0]}</td>
-                                                <td style={{ padding: '3px 6px', fontFamily: 'monospace', fontWeight: 'bold' }}>{row[1]}</td>
-                                                <td style={{ padding: '3px 6px', color: '#aaa' }}>{row[2]}</td>
-                                                <td style={{ padding: '3px 6px', fontFamily: 'monospace', fontWeight: 'bold' }}>{row[3]}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        )}
-                    </div>
+                            {currentFrame && (
+                                <div style={{ background: 'rgba(0,0,0,0.3)', borderRadius: '6px', padding: '12px', fontSize: '0.88em' }}>
+                                    <h4 style={{ margin: '0 0 8px 0', color: currentFrame.elevation > 0 ? '#4ecdc4' : '#ff6b6b' }}>
+                                        {currentFrame.elevation > 0 ? '\u2705' : '\u26a0\ufe0f'} Frame Details {currentFrame.elevation <= 0 ? '(Below Horizon)' : ''}
+                                    </h4>
+                                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                        <tbody>
+                                            {[
+                                                ['Elevation', currentFrame.elevation.toFixed(2) + '\u00b0', 'Azimuth', currentFrame.azimuth.toFixed(1) + '\u00b0'],
+                                                ['Range', currentFrame.slantRange.toFixed(1) + ' km', 'FSPL', currentFrame.absoluteFspl.toFixed(2) + ' dB'],
+                                                ['Rx Power', currentFrame.rxPowerDbm.toFixed(2) + ' dBm', 'SNR', currentFrame.snrDb.toFixed(2) + ' dB'],
+                                                ['Noise Floor', currentFrame.noiseFloorDbm.toFixed(2) + ' dBm', 'T_sky', currentFrame.tSky.toFixed(1) + ' K'],
+                                                ['XPD', currentFrame.xpd.toFixed(2) + ' dB', 'MIMO R2', currentFrame.capRank2.toFixed(2) + ' bps/Hz'],
+                                                ['Group Delay', currentFrame.groupDelayNs.toFixed(2) + ' ns', 'Dispersion', currentFrame.dispersionNs.toFixed(3) + ' ns'],
+                                                ['\u03c3_\u03c4', currentFrame.cir.rmsDelaySpread_ns.toFixed(2) + ' ns', 'Bc', currentFrame.cir.coherenceBandwidth_MHz.toFixed(1) + ' MHz'],
+                                            ].map((row, i) => (
+                                                <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                                                    <td style={{ padding: '3px 6px', color: '#aaa' }}>{row[0]}</td>
+                                                    <td style={{ padding: '3px 6px', fontFamily: 'monospace', fontWeight: 'bold' }}>{row[1]}</td>
+                                                    <td style={{ padding: '3px 6px', color: '#aaa' }}>{row[2]}</td>
+                                                    <td style={{ padding: '3px 6px', fontFamily: 'monospace', fontWeight: 'bold' }}>{row[3]}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </>
             )}
         </div>

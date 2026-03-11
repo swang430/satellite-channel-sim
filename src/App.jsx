@@ -1,21 +1,57 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, BarController, Title, Tooltip, Legend, ScatterController } from 'chart.js';
-import { Line, Scatter } from 'react-chartjs-2';
+import { Line } from 'react-chartjs-2';
+import JSZip from 'jszip';
 import './App.css';
-import { calculateLinkBudget, calculateMIMOCapacity, fitModelToData, calibrateModel, applyCalibration, createDefaultCalibration, calculateDynamicOrbit, predictPasses, computeGroundTrack, computeSkyTrack, generatePassReplay, generateWgs84TrajectoryCsv } from './model';
+import { calculateLinkBudget, calculateMIMOCapacity, calculateDynamicOrbit, predictPasses, computeGroundTrack, computeSkyTrack, generatePassReplay, generateTrajectoryExport } from './model';
 import ChannelSimPanel from './ChannelSimPanel';
 import UserManual from './UserManual';
+import { buildSimulationProjectManifest, buildTrajectoryCsv } from './projectSync';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, BarController, Title, Tooltip, Legend, ScatterController);
 ChartJS.defaults.color = 'rgba(0, 229, 255, 0.7)';
 ChartJS.defaults.borderColor = 'rgba(0, 229, 255, 0.1)';
 ChartJS.defaults.font.family = "'Space Mono', monospace";
 
+const DEFAULT_CIR_SYNC_STATE = {
+  isStandaloneMode: false,
+  activeIndex: 0,
+  samplePoints: [],
+  handshake: null,
+  importInfo: null,
+  tleLine1: '',
+  tleLine2: '',
+  groundStation: null
+};
+
 
 // === Milestone 22: Ground Track Canvas Component ===
-function GroundTrackCanvas({ canvasRef, tleLine1, tleLine2, syncLat, syncLon }) {
+function GroundTrackCanvas({ canvasRef, tleLine1, tleLine2, syncLat, syncLon, samplePoints = [], activeSampleIndex = 0, onSamplePointSelect }) {
   const localRef = useRef(null);
   const ref = canvasRef || localRef;
+  const sampleMarkersRef = useRef([]);
+
+  function handleCanvasClick(event) {
+    if (!sampleMarkersRef.current.length || !onSamplePointSelect) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const clickX = event.clientX - rect.left;
+    const clickY = event.clientY - rect.top;
+
+    let nearest = null;
+    let nearestDist = Number.POSITIVE_INFINITY;
+
+    for (const marker of sampleMarkersRef.current) {
+      const dist = Math.hypot(marker.x - clickX, marker.y - clickY);
+      if (dist < nearestDist) {
+        nearest = marker;
+        nearestDist = dist;
+      }
+    }
+
+    if (nearest && nearestDist <= 10) {
+      onSamplePointSelect(nearest.index);
+    }
+  }
 
   useEffect(() => {
     const canvas = ref.current;
@@ -24,6 +60,7 @@ function GroundTrackCanvas({ canvasRef, tleLine1, tleLine2, syncLat, syncLon }) 
     const W = canvas.width, H = canvas.height;
 
     function draw() {
+      sampleMarkersRef.current = [];
       ctx.clearRect(0, 0, W, H);
       // Background ocean
       ctx.fillStyle = '#1a2a4a';
@@ -53,26 +90,25 @@ function GroundTrackCanvas({ canvasRef, tleLine1, tleLine2, syncLat, syncLon }) 
 
       // Compute ground track
       const points = computeGroundTrack(tleLine1, tleLine2, 100);
-      if (points.length < 2) return;
-
-      // Draw track
       let currentPt = null;
-      for (let i = 1; i < points.length; i++) {
-        const p0 = points[i - 1], p1 = points[i];
-        const x0 = W / 2 + (p0.lon / 180) * (W / 2);
-        const y0 = H / 2 - (p0.lat / 90) * (H / 2);
-        const x1 = W / 2 + (p1.lon / 180) * (W / 2);
-        const y1 = H / 2 - (p1.lat / 90) * (H / 2);
+      if (points.length >= 2) {
+        for (let i = 1; i < points.length; i++) {
+          const p0 = points[i - 1], p1 = points[i];
+          const x0 = W / 2 + (p0.lon / 180) * (W / 2);
+          const y0 = H / 2 - (p0.lat / 90) * (H / 2);
+          const x1 = W / 2 + (p1.lon / 180) * (W / 2);
+          const y1 = H / 2 - (p1.lat / 90) * (H / 2);
 
-        // Skip wrap-around segments
-        if (Math.abs(p1.lon - p0.lon) > 180) continue;
+          // Skip wrap-around segments
+          if (Math.abs(p1.lon - p0.lon) > 180) continue;
 
-        const alpha = p1.isCurrent ? 1.0 : 0.3 + 0.7 * (i / points.length);
-        ctx.strokeStyle = `rgba(0, 255, 136, ${alpha})`;
-        ctx.lineWidth = p1.isCurrent ? 3 : 1.5;
-        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+          const alpha = p1.isCurrent ? 1.0 : 0.3 + 0.7 * (i / points.length);
+          ctx.strokeStyle = `rgba(0, 255, 136, ${alpha})`;
+          ctx.lineWidth = p1.isCurrent ? 3 : 1.5;
+          ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
 
-        if (p1.isCurrent) currentPt = { x: x1, y: y1, lat: p1.lat, lon: p1.lon, alt: p1.alt };
+          if (p1.isCurrent) currentPt = { x: x1, y: y1, lat: p1.lat, lon: p1.lon, alt: p1.alt };
+        }
       }
 
       // Ground station marker
@@ -91,21 +127,68 @@ function GroundTrackCanvas({ canvasRef, tleLine1, tleLine2, syncLat, syncLon }) 
         ctx.fillText(`SAT ${currentPt.alt.toFixed(0)}km`, currentPt.x + 10, currentPt.y - 4);
       }
 
+      if (samplePoints.length > 0) {
+        ctx.strokeStyle = 'rgba(255, 214, 10, 0.65)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        samplePoints.forEach((point, index) => {
+          const x = W / 2 + (point.lon / 180) * (W / 2);
+          const y = H / 2 - (point.lat / 90) * (H / 2);
+          if (index === 0 || Math.abs(point.lon - samplePoints[index - 1].lon) > 180) {
+            ctx.moveTo(x, y);
+          } else {
+            ctx.lineTo(x, y);
+          }
+        });
+        ctx.stroke();
+
+        samplePoints.forEach((point, index) => {
+          const x = W / 2 + (point.lon / 180) * (W / 2);
+          const y = H / 2 - (point.lat / 90) * (H / 2);
+          const isActive = index === activeSampleIndex;
+          sampleMarkersRef.current.push({ index, x, y });
+
+          ctx.fillStyle = isActive ? '#ffd60a' : 'rgba(255, 214, 10, 0.72)';
+          ctx.beginPath();
+          ctx.arc(x, y, isActive ? 4.5 : 1.8, 0, Math.PI * 2);
+          ctx.fill();
+
+          if (isActive) {
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+          }
+        });
+      }
+
       // Title
       ctx.fillStyle = '#fff'; ctx.font = 'bold 12px sans-serif';
       ctx.fillText('\ud83c\udf0d Ground Track (Equirectangular)', 8, 16);
+      if (samplePoints.length > 0) {
+        ctx.fillStyle = '#ffd60a';
+        ctx.font = '10px monospace';
+        ctx.fillText(`Linked CIR samples: ${samplePoints.length}`, 8, 31);
+      }
     }
 
     draw();
     const timer = setInterval(draw, 5000);
     return () => clearInterval(timer);
-  }, [tleLine1, tleLine2, syncLat, syncLon]);
+  }, [tleLine1, tleLine2, syncLat, syncLon, samplePoints, activeSampleIndex, ref]);
 
-  return <canvas ref={ref} width={560} height={280} style={{ border: '1px solid #333', borderRadius: '5px', flex: '1 1 540px', minWidth: '300px' }} />;
+  return (
+    <canvas
+      ref={ref}
+      width={560}
+      height={280}
+      onClick={handleCanvasClick}
+      style={{ border: '1px solid #333', borderRadius: '5px', flex: '1 1 540px', minWidth: '300px', cursor: samplePoints.length > 0 ? 'pointer' : 'default' }}
+    />
+  );
 }
 
 // === Milestone 22: Sky Plot Canvas Component ===
-function SkyPlotCanvas({ canvasRef, tleLine1, tleLine2, syncLat, syncLon }) {
+function SkyPlotCanvas({ canvasRef, tleLine1, tleLine2, syncLat, syncLon, samplePoints = [], activeSampleIndex = 0 }) {
   const localRef = useRef(null);
   const ref = canvasRef || localRef;
 
@@ -151,25 +234,25 @@ function SkyPlotCanvas({ canvasRef, tleLine1, tleLine2, syncLat, syncLon }) {
 
       // Compute sky track
       const points = computeSkyTrack(tleLine1, tleLine2, syncLat, syncLon, 0, 100);
-      if (points.length < 2) return;
-
       let currentPt = null;
-      for (let i = 1; i < points.length; i++) {
-        const p0 = points[i - 1], p1 = points[i];
-        if (p0.elev < -5 && p1.elev < -5) continue; // skip fully below horizon
-        const r0 = R * (1 - Math.max(0, p0.elev) / 90);
-        const a0 = (p0.az - 90) * Math.PI / 180;
-        const r1 = R * (1 - Math.max(0, p1.elev) / 90);
-        const a1 = (p1.az - 90) * Math.PI / 180;
-        const x0 = cx + r0 * Math.cos(a0), y0 = cy + r0 * Math.sin(a0);
-        const x1 = cx + r1 * Math.cos(a1), y1 = cy + r1 * Math.sin(a1);
+      if (points.length >= 2) {
+        for (let i = 1; i < points.length; i++) {
+          const p0 = points[i - 1], p1 = points[i];
+          if (p0.elev < -5 && p1.elev < -5) continue; // skip fully below horizon
+          const r0 = R * (1 - Math.max(0, p0.elev) / 90);
+          const a0 = (p0.az - 90) * Math.PI / 180;
+          const r1 = R * (1 - Math.max(0, p1.elev) / 90);
+          const a1 = (p1.az - 90) * Math.PI / 180;
+          const x0 = cx + r0 * Math.cos(a0), y0 = cy + r0 * Math.sin(a0);
+          const x1 = cx + r1 * Math.cos(a1), y1 = cy + r1 * Math.sin(a1);
 
-        const visible = p1.elev > 0;
-        ctx.strokeStyle = visible ? 'rgba(0, 255, 136, 0.8)' : 'rgba(255, 100, 100, 0.3)';
-        ctx.lineWidth = visible ? 2 : 1;
-        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+          const visible = p1.elev > 0;
+          ctx.strokeStyle = visible ? 'rgba(0, 255, 136, 0.8)' : 'rgba(255, 100, 100, 0.3)';
+          ctx.lineWidth = visible ? 2 : 1;
+          ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
 
-        if (p1.isCurrent) currentPt = { x: x1, y: y1, az: p1.az, elev: p1.elev };
+          if (p1.isCurrent) currentPt = { x: x1, y: y1, az: p1.az, elev: p1.elev };
+        }
       }
 
       // Current position marker
@@ -184,16 +267,56 @@ function SkyPlotCanvas({ canvasRef, tleLine1, tleLine2, syncLat, syncLon }) {
       // Zenith marker
       ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI * 2); ctx.fill();
 
+      if (samplePoints.length > 0) {
+        ctx.strokeStyle = 'rgba(255, 214, 10, 0.65)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        samplePoints.forEach((point, index) => {
+          const r = R * (1 - Math.max(0, point.elevation) / 90);
+          const a = (point.azimuth - 90) * Math.PI / 180;
+          const x = cx + r * Math.cos(a);
+          const y = cy + r * Math.sin(a);
+          if (index === 0) {
+            ctx.moveTo(x, y);
+          } else {
+            ctx.lineTo(x, y);
+          }
+        });
+        ctx.stroke();
+
+        samplePoints.forEach((point, index) => {
+          const r = R * (1 - Math.max(0, point.elevation) / 90);
+          const a = (point.azimuth - 90) * Math.PI / 180;
+          const x = cx + r * Math.cos(a);
+          const y = cy + r * Math.sin(a);
+          const isActive = index === activeSampleIndex;
+          ctx.fillStyle = isActive ? '#ffd60a' : 'rgba(255, 214, 10, 0.7)';
+          ctx.beginPath();
+          ctx.arc(x, y, isActive ? 4.5 : 1.8, 0, Math.PI * 2);
+          ctx.fill();
+          if (isActive) {
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 1.2;
+            ctx.stroke();
+          }
+        });
+      }
+
       // Title
       ctx.fillStyle = '#fff'; ctx.font = 'bold 12px sans-serif';
       ctx.textAlign = 'left';
       ctx.fillText('\ud83c\udf1f Sky Plot (Polar)', 8, 16);
+      if (samplePoints.length > 0) {
+        ctx.fillStyle = '#ffd60a';
+        ctx.font = '10px monospace';
+        ctx.fillText(`Linked CIR frame: ${activeSampleIndex + 1}/${samplePoints.length}`, 8, 31);
+      }
     }
 
     draw();
     const timer = setInterval(draw, 5000);
     return () => clearInterval(timer);
-  }, [tleLine1, tleLine2, syncLat, syncLon]);
+  }, [tleLine1, tleLine2, syncLat, syncLon, samplePoints, activeSampleIndex, ref]);
 
   return <canvas ref={ref} width={300} height={300} style={{ border: '1px solid #333', borderRadius: '5px', flex: '0 0 300px' }} />;
 }
@@ -237,8 +360,8 @@ function App() {
   const [gsAlt, setGsAlt] = useState(0); // Ground Station altitude in meters
   const [disableFastFading, setDisableFastFading] = useState(true);
 
-  const [replayData, setReplayData] = useState([]);
-  const [replayIndex, setReplayIndex] = useState(0);
+  const [replayData] = useState([]);
+  const [, setReplayIndex] = useState(0);
 
   // Orbital Mechanics Controls
   const ISS_TLE1 = '1 25544U 98067A   23249.52157811  .00018042  00000-0  32479-3 0  9997';
@@ -267,6 +390,9 @@ function App() {
     const tzOffset = (new Date()).getTimezoneOffset() * 60000;
     return (new Date(Date.now() - tzOffset)).toISOString().slice(0, 16);
   });
+  const [activeProjectManifest, setActiveProjectManifest] = useState(null);
+  const [requestedCirIndex, setRequestedCirIndex] = useState(0);
+  const [cirSyncState, setCirSyncState] = useState(DEFAULT_CIR_SYNC_STATE);
 
   // Replay animation effect
   useEffect(() => {
@@ -308,26 +434,51 @@ function App() {
     URL.revokeObjectURL(url);
   }
 
-  function handleExportWgs84Trajectory() {
+  async function handleExportWgs84Trajectory() {
     const startTime = new Date();
-    // Generate 60 seconds of data at 1ms precision (1/60000 minutes) to avoid browser crash
-    const csv = generateWgs84TrajectoryCsv(tleLine1, tleLine2, startTime, 1/60, 1/60000);
-    if (!csv) {
+    const trajectoryConfig = { startTime, durationMs: 60 * 1000, stepMs: 1 };
+    const trajectory = generateTrajectoryExport(tleLine1, tleLine2, syncLat, syncLon, gsAlt, trajectoryConfig);
+    if (!trajectory.length) {
       setTleFetchError('Failed to export WGS84 trajectory. Please verify the current TLE lines.');
       return;
     }
 
     const safeSat = (satName || noradId || 'satellite').replace(/[^a-zA-Z0-9._-]+/g, '_');
     const fileStamp = startTime.toISOString().replace(/:/g, '-').slice(0, 19);
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const manifest = buildSimulationProjectManifest({
+      satellite: {
+        name: satName,
+        noradId,
+        tleLine1,
+        tleLine2,
+        params: { ...params }
+      },
+      groundStation: { lat: syncLat, lon: syncLon, alt: gsAlt },
+      trajectory: {
+        file: 'trajectory.csv',
+        startTime: startTime.toISOString(),
+        durationMs: trajectoryConfig.durationMs,
+        stepMs: trajectoryConfig.stepMs,
+        sampleCount: trajectory.length
+      },
+      linkParams: {
+        disableFastFading,
+        syncMode
+      }
+    });
+    const zip = new JSZip();
+    zip.file('trajectory.csv', buildTrajectoryCsv(trajectory));
+    zip.file('manifest.json', JSON.stringify(manifest, null, 2));
+    const blob = await zip.generateAsync({ type: 'blob' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${safeSat}_wgs84_trajectory_${fileStamp}.csv`;
+    a.download = `${safeSat}_simulation_project_${fileStamp}.zip`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    setActiveProjectManifest(manifest);
     setTleFetchError('');
   }
   const [satName, setSatName] = useState('ISS (ZARYA)');
@@ -460,7 +611,7 @@ function App() {
       setParams(prev => ({ ...prev, slantRange: 35786 }));
     }
     return () => clearInterval(intervalId);
-  }, [isDynamicOrbit, tleLine1, tleLine2, syncLat, syncLon]);
+  }, [isDynamicOrbit, tleLine1, tleLine2, syncLat, syncLon, gsAlt]);
 
   // Live Sync Effect (Client-Side Only)
   useEffect(() => {
@@ -564,38 +715,6 @@ function App() {
     statusClass = "warn";
   }
 
-  const handleFileUpload = (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const json = JSON.parse(e.target.result);
-        if (Array.isArray(json)) {
-          setReplayData(json);
-          setRealData(json);
-          setFittingInfo(`Loaded ${json.length} data points into Replay/Static Buffer.`);
-        } else {
-          setFittingInfo("Invalid JSON format. Expected an array of objects.");
-        }
-      } catch (err) {
-        setFittingInfo("Error parsing JSON file: " + err.message);
-      }
-    };
-    reader.readAsText(file);
-  };
-
-  const triggerCalibration = () => {
-    if (realData.length === 0) {
-      setFittingInfo("No real data to calibrate against!");
-      return;
-    }
-    const bestFactor = fitModelToData(realData, params);
-    setParams(prev => ({ ...prev, correctionFactor: bestFactor }));
-    setFittingInfo(`Calibrated! New Correction Factor: ${bestFactor.toFixed(3)}`);
-  };
-
   const rainRates = Array.from({ length: 50 }, (_, i) => i * 2);
 
   const dataRain = rainRates.map(r => {
@@ -666,6 +785,26 @@ function App() {
       }
     ],
   };
+
+  const displayCirTleLine1 = cirSyncState.tleLine1 || tleLine1;
+  const displayCirTleLine2 = cirSyncState.tleLine2 || tleLine2;
+  const displayCirGroundStation = cirSyncState.groundStation || { lat: syncLat, lon: syncLon, alt: gsAlt };
+
+  const handleChannelGroundStationChange = useCallback((nextGroundStation) => {
+    if (nextGroundStation?.lat != null) setSyncLat(nextGroundStation.lat);
+    if (nextGroundStation?.lon != null) setSyncLon(nextGroundStation.lon);
+    if (nextGroundStation?.alt != null) setGsAlt(nextGroundStation.alt);
+  }, []);
+
+  const handleCirSyncStateChange = useCallback((nextState) => {
+    const mergedState = {
+      ...DEFAULT_CIR_SYNC_STATE,
+      ...nextState,
+      samplePoints: nextState?.samplePoints || []
+    };
+    setCirSyncState(mergedState);
+    setRequestedCirIndex(mergedState.activeIndex || 0);
+  }, []);
 
   return (
     <div className="App">
@@ -753,9 +892,14 @@ function App() {
                 onClick={handleExportWgs84Trajectory}
                 style={{ padding: '4px 12px', background: '#138496', color: 'white', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}
               >
-                ⬇️ Export WGS84 Trajectory
+                ⬇️ Export Simulation Project
               </button>
-              <small style={{ color: '#666' }}>60s window, 1ms interval, starting from now (CSV)</small>
+              <small style={{ color: '#666' }}>60s window, 1ms interval, starting from now (ZIP: trajectory.csv + manifest.json)</small>
+              {activeProjectManifest && (
+                <small style={{ color: '#4ecdc4' }}>
+                  Task_ID: {activeProjectManifest.Task_ID.slice(0, 8)}...
+                </small>
+              )}
             </div>
             {orbitData && (
               <div style={{ fontSize: '0.9em', color: '#4ecdc4', marginTop: '5px' }}>
@@ -829,10 +973,27 @@ function App() {
       </div>
 
       {/* Milestone 22: Orbit Visualization */}
-      {isDynamicOrbit && (
+      {isDynamicOrbit && !cirSyncState.isStandaloneMode && (
         <div style={{ display: 'flex', gap: '15px', marginBottom: '20px', flexWrap: 'wrap' }}>
-          <GroundTrackCanvas canvasRef={groundTrackRef} tleLine1={tleLine1} tleLine2={tleLine2} syncLat={syncLat} syncLon={syncLon} />
-          <SkyPlotCanvas canvasRef={skyPlotRef} tleLine1={tleLine1} tleLine2={tleLine2} syncLat={syncLat} syncLon={syncLon} />
+          <GroundTrackCanvas
+            canvasRef={groundTrackRef}
+            tleLine1={displayCirTleLine1}
+            tleLine2={displayCirTleLine2}
+            syncLat={displayCirGroundStation.lat}
+            syncLon={displayCirGroundStation.lon}
+            samplePoints={cirSyncState.samplePoints}
+            activeSampleIndex={cirSyncState.activeIndex}
+            onSamplePointSelect={setRequestedCirIndex}
+          />
+          <SkyPlotCanvas
+            canvasRef={skyPlotRef}
+            tleLine1={displayCirTleLine1}
+            tleLine2={displayCirTleLine2}
+            syncLat={displayCirGroundStation.lat}
+            syncLon={displayCirGroundStation.lon}
+            samplePoints={cirSyncState.samplePoints}
+            activeSampleIndex={cirSyncState.activeIndex}
+          />
         </div>
       )}
 
@@ -1104,14 +1265,17 @@ function App() {
       </div>
 
       {/* === 信道传播仿真面板 === */}
-      {isDynamicOrbit && (
-        <ChannelSimPanel
-          tleLine1={tleLine1}
-          tleLine2={tleLine2}
-          satName={satName}
-          globalParams={params}
-        />
-      )}
+      <ChannelSimPanel
+        tleLine1={tleLine1}
+        tleLine2={tleLine2}
+        satName={satName}
+        globalParams={params}
+        groundStation={{ lat: syncLat, lon: syncLon, alt: gsAlt }}
+        onGroundStationChange={handleChannelGroundStationChange}
+        activeProjectManifest={activeProjectManifest}
+        requestedCirIndex={requestedCirIndex}
+        onCirSyncStateChange={handleCirSyncStateChange}
+      />
 
       {/* === 使用手册浮层 === */}
       {showManual && <UserManual onClose={() => setShowManual(false)} />}

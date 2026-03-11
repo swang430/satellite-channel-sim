@@ -894,6 +894,7 @@ export function generateChannelTimeSeries(
 
       const gmst = satellite.gstime(date);
       const ecf = satellite.eciToEcf(pv.position, gmst);
+      const geodetic = satellite.eciToGeodetic(pv.position, gmst);
       const la = satellite.ecfToLookAngles(observerGd, ecf);
       const elev = satellite.radiansToDegrees(la.elevation);
       const az = satellite.radiansToDegrees(la.azimuth);
@@ -947,6 +948,9 @@ export function generateChannelTimeSeries(
         elevation: elev,
         azimuth: az,
         slantRange: range,
+        satLat: satellite.radiansToDegrees(geodetic.latitude),
+        satLon: satellite.radiansToDegrees(geodetic.longitude),
+        satAlt: geodetic.height,
         apparentElevation: lb.apparentElevation,
         // 链路预算（绝对值）
         absoluteFspl,
@@ -985,19 +989,36 @@ export function generateChannelTimeSeries(
   }
 }
 
-export function generateTrajectoryExport(tleLine1, tleLine2, gsLat, gsLon, gsAlt = 0, hours = 24, stepMinutes = 1) {
+export function generateTrajectoryExport(tleLine1, tleLine2, gsLat, gsLon, gsAlt = 0, configOrHours = 24, stepMinutes = 1, startTime = new Date()) {
   try {
     const satrec = satellite.twoline2satrec(tleLine1, tleLine2);
     const points = [];
-    const now = new Date();
+    let start = new Date(startTime);
+    let durationMs = 24 * 60 * 60 * 1000;
+    let stepMs = 60 * 1000;
+
+    if (typeof configOrHours === 'object' && configOrHours !== null) {
+      start = new Date(configOrHours.startTime || startTime || new Date());
+      durationMs = configOrHours.durationMs ?? durationMs;
+      stepMs = configOrHours.stepMs ?? stepMs;
+    } else {
+      durationMs = Number(configOrHours) * 60 * 60 * 1000;
+      stepMs = Number(stepMinutes) * 60 * 1000;
+    }
+
+    if (!Number.isFinite(durationMs) || durationMs < 0 || !Number.isFinite(stepMs) || stepMs <= 0) {
+      return [];
+    }
+
     const gsGd = {
       latitude: satellite.degreesToRadians(gsLat),
       longitude: satellite.degreesToRadians(gsLon),
       height: gsAlt / 1000
     };
 
-    for (let m = 0; m <= hours * 60; m += stepMinutes) {
-      const date = new Date(now.getTime() + m * 60000);
+    const totalSteps = Math.floor(durationMs / stepMs);
+    for (let step = 0; step <= totalSteps; step++) {
+      const date = new Date(start.getTime() + step * stepMs);
       const pv = satellite.propagate(satrec, date);
       if (!pv.position) continue;
       const gmst = satellite.gstime(date);
@@ -1013,7 +1034,7 @@ export function generateTrajectoryExport(tleLine1, tleLine2, gsLat, gsLon, gsAlt
         satAlt: geodetic.height,
         azimuth: satellite.radiansToDegrees(lookAngles.azimuth),
         elevation: satellite.radiansToDegrees(lookAngles.elevation),
-        range: lookAngles.range
+        range: lookAngles.rangeSat ?? lookAngles.range ?? 0
       });
     }
     return points;
