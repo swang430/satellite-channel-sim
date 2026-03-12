@@ -1043,3 +1043,111 @@ export function generateTrajectoryExport(tleLine1, tleLine2, gsLat, gsLon, gsAlt
     return [];
   }
 }
+
+export function extractGoldenTrajectory(denseTrajectory, streetAzimuth = null) {
+  if (!denseTrajectory || denseTrajectory.length === 0) return [];
+  
+  // Sort by time
+  const sorted = [...denseTrajectory].sort((a, b) => new Date(a.time) - new Date(b.time));
+  
+  // Find highest elevation point (Benchmark)
+  let maxElevPoint = sorted[0];
+  let maxElevIdx = 0;
+  sorted.forEach((pt, i) => {
+    if (pt.elevation > maxElevPoint.elevation) {
+      maxElevPoint = pt;
+      maxElevIdx = i;
+    }
+  });
+  
+  const goldenPoints = [];
+  const thresholds = [15, 30, 45, 60];
+  
+  // Track crossings
+  const addThresholdCrossings = (startIdx, endIdx, isAscending) => {
+    let currentThreshIdx = isAscending ? 0 : thresholds.length - 1;
+    let step = isAscending ? 1 : -1;
+    
+    for (let i = startIdx; isAscending ? i <= endIdx : i >= endIdx; isAscending ? i++ : i--) {
+      const pt = sorted[i];
+      if (currentThreshIdx >= 0 && currentThreshIdx < thresholds.length) {
+        const targetElev = thresholds[currentThreshIdx];
+        const passed = isAscending ? (pt.elevation >= targetElev) : (pt.elevation <= targetElev);
+        
+        if (passed) {
+          goldenPoints.push({
+            ...pt,
+            feature: `Elev_${targetElev}_${isAscending ? 'Asc' : 'Desc'}`,
+            description: targetElev === 15 ? (isAscending ? 'AOS Entry (Low Elev)' : 'LOS Exit (Low Elev)') 
+                       : targetElev === 45 ? 'Building Blockage Threshold' 
+                       : `Mid Elev ${targetElev}`
+          });
+          currentThreshIdx += step;
+        }
+      }
+    }
+  };
+  
+  addThresholdCrossings(0, maxElevIdx, true); // Ascending
+  
+  goldenPoints.push({
+    ...maxElevPoint,
+    feature: 'Max_Elevation',
+    description: 'Zenith / Shortest Path (Benchmark LOS)'
+  });
+  
+  addThresholdCrossings(sorted.length - 1, maxElevIdx + 1, false); // Descending
+  
+  // Street Azimuth (Parallel / Perpendicular)
+  if (streetAzimuth !== null && streetAzimuth !== undefined && streetAzimuth !== '') {
+    const streetAz = Number(streetAzimuth);
+    const parAz1 = streetAz;
+    const parAz2 = (streetAz + 180) % 360;
+    const perpAz1 = (streetAz + 90) % 360;
+    const perpAz2 = (streetAz + 270) % 360;
+    
+    const angleDiff = (a1, a2) => {
+      let diff = Math.abs(a1 - a2) % 360;
+      return diff > 180 ? 360 - diff : diff;
+    };
+    
+    let bestPar = sorted[0];
+    let minParDiff = 360;
+    let bestPerp = sorted[0];
+    let minPerpDiff = 360;
+    
+    sorted.forEach(pt => {
+      const az = pt.azimuth;
+      if (az === undefined) return;
+      const dPar = Math.min(angleDiff(az, parAz1), angleDiff(az, parAz2));
+      const dPerp = Math.min(angleDiff(az, perpAz1), angleDiff(az, perpAz2));
+      
+      if (dPar < minParDiff) {
+        minParDiff = dPar;
+        bestPar = pt;
+      }
+      if (dPerp < minPerpDiff) {
+        minPerpDiff = dPerp;
+        bestPerp = pt;
+      }
+    });
+    
+    if (minParDiff < 15 && !goldenPoints.some(p => p.time === bestPar.time)) {
+      goldenPoints.push({
+        ...bestPar,
+        feature: 'Street_Parallel',
+        description: 'Street Canyon Waveguide Effect'
+      });
+    }
+    if (minPerpDiff < 15 && !goldenPoints.some(p => p.time === bestPerp.time)) {
+      goldenPoints.push({
+        ...bestPerp,
+        feature: 'Street_Perpendicular',
+        description: 'Max Urban Blockage (Knife-edge)'
+      });
+    }
+  }
+  
+  // Sort final points by time
+  return goldenPoints.sort((a, b) => new Date(a.time) - new Date(b.time));
+}

@@ -3,7 +3,7 @@ import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement
 import { Line } from 'react-chartjs-2';
 import JSZip from 'jszip';
 import './App.css';
-import { calculateLinkBudget, calculateMIMOCapacity, calculateDynamicOrbit, predictPasses, computeGroundTrack, computeSkyTrack, generatePassReplay, generateTrajectoryExport } from './model';
+import { calculateLinkBudget, calculateMIMOCapacity, calculateDynamicOrbit, predictPasses, computeGroundTrack, computeSkyTrack, generatePassReplay, generateTrajectoryExport, extractGoldenTrajectory } from './model';
 import ChannelSimPanel from './ChannelSimPanel';
 import UserManual from './UserManual';
 import { buildSimulationProjectManifest, buildTrajectoryCsv } from './projectSync';
@@ -188,9 +188,32 @@ function GroundTrackCanvas({ canvasRef, tleLine1, tleLine2, syncLat, syncLon, sa
 }
 
 // === Milestone 22: Sky Plot Canvas Component ===
-function SkyPlotCanvas({ canvasRef, tleLine1, tleLine2, syncLat, syncLon, samplePoints = [], activeSampleIndex = 0 }) {
+function SkyPlotCanvas({ canvasRef, tleLine1, tleLine2, syncLat, syncLon, samplePoints = [], activeSampleIndex = 0, onSamplePointSelect }) {
   const localRef = useRef(null);
   const ref = canvasRef || localRef;
+  const sampleMarkersRef = useRef([]);
+
+  function handleCanvasClick(event) {
+    if (!sampleMarkersRef.current.length || !onSamplePointSelect) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const clickX = event.clientX - rect.left;
+    const clickY = event.clientY - rect.top;
+
+    let nearest = null;
+    let nearestDist = Number.POSITIVE_INFINITY;
+
+    for (const marker of sampleMarkersRef.current) {
+      const dist = Math.hypot(marker.x - clickX, marker.y - clickY);
+      if (dist < nearestDist) {
+        nearestDist = dist;
+        nearest = marker;
+      }
+    }
+
+    if (nearest && nearestDist < 15) { // 15px hit radius
+      onSamplePointSelect(nearest.index);
+    }
+  }
 
   useEffect(() => {
     const canvas = ref.current;
@@ -481,7 +504,76 @@ function App() {
     setActiveProjectManifest(manifest);
     setTleFetchError('');
   }
+  async function handleExportGoldenTrajectory() {
+    const startTime = new Date();
+    // Use a dense trajectory with 1s step for 20 minutes (enough for a typical pass)
+    const trajectoryConfig = { startTime, durationMs: 20 * 60 * 1000, stepMs: 1000 };
+    const denseTrajectory = generateTrajectoryExport(tleLine1, tleLine2, syncLat, syncLon, gsAlt, trajectoryConfig);
+    if (!denseTrajectory || !denseTrajectory.length) {
+      setTleFetchError('Failed to generate dense trajectory for RT Golden Export. Check TLE.');
+      return;
+    }
+
+    const goldenPoints = extractGoldenTrajectory(denseTrajectory, streetAzimuth);
+    if (!goldenPoints || !goldenPoints.length) {
+      setTleFetchError('Failed to extract golden points. Maybe satellite never visible?');
+      return;
+    }
+
+    const safeSat = (satName || noradId || 'satellite').replace(/[^a-zA-Z0-9._-]+/g, '_');
+    const fileStamp = startTime.toISOString().replace(/:/g, '-').slice(0, 19);
+    
+    // Create manifest marking this as a Golden RT Trajectory
+    const manifest = buildSimulationProjectManifest({
+      satellite: {
+        name: satName,
+        noradId,
+        tleLine1,
+        tleLine2,
+        params: { ...params }
+      },
+      groundStation: { lat: syncLat, lon: syncLon, alt: gsAlt },
+      trajectory: {
+        file: 'trajectory.csv',
+        startTime: startTime.toISOString(),
+        durationMs: trajectoryConfig.durationMs,
+        stepMs: trajectoryConfig.stepMs,
+        sampleCount: goldenPoints.length,
+        type: 'golden_rt',
+        streetAzimuth: streetAzimuth
+      },
+      linkParams: {
+        disableFastFading,
+        syncMode
+      }
+    });
+
+    const zip = new JSZip();
+    
+    // Add feature/description columns to the CSV
+    const csvHeader = 'Timestamp,Latitude (deg),Longitude (deg),Altitude (km),Azimuth (deg),Elevation (deg),Slant Range (km),Feature,Description\n';
+    const csvRows = goldenPoints.map(p => {
+      const ts = p.time || p.timestamp || '';
+      return `${ts},${(p.satLat||0).toFixed(6)},${(p.satLon||0).toFixed(6)},${(p.satAlt||0).toFixed(3)},${(p.azimuth||0).toFixed(2)},${(p.elevation||0).toFixed(2)},${(p.range||0).toFixed(2)},"${p.feature||''}","${p.description||''}"`;
+    });
+    zip.file('trajectory.csv', csvHeader + csvRows.join('\n'));
+    zip.file('manifest.json', JSON.stringify(manifest, null, 2));
+    
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${safeSat}_GoldenRT_${fileStamp}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setActiveProjectManifest(manifest);
+    setTleFetchError('');
+  }
+
   const [satName, setSatName] = useState('ISS (ZARYA)');
+  const [streetAzimuth, setStreetAzimuth] = useState('');
   const [noradId, setNoradId] = useState('25544');
   const [tleFetching, setTleFetching] = useState(false);
   const [tleFetchError, setTleFetchError] = useState('');
@@ -901,6 +993,19 @@ function App() {
                 </small>
               )}
             </div>
+
+            {/* Golden RT Export */}
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginTop: '10px', padding: '8px', border: '1px solid #ffc107', borderRadius: '4px', background: 'rgba(255,193,7,0.1)' }}>
+              <label style={{ whiteSpace: 'nowrap', fontWeight: 'bold', color: '#ffc107' }}>🏙️ Street Azimuth (°):</label>
+              <input type="number" value={streetAzimuth} onChange={e => setStreetAzimuth(e.target.value)} placeholder="e.g. 0 for N-S" style={{ width: '120px', fontFamily: 'monospace' }} />
+              <button
+                onClick={handleExportGoldenTrajectory}
+                style={{ padding: '4px 12px', background: '#ffc107', color: '#333', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}
+              >
+                🌟 Export Golden RT Trajectory (Non-Uniform)
+              </button>
+              <small style={{ color: '#aaa' }}>Extracts 8-10 geometric key points from a 20-min pass for RT engines.</small>
+            </div>
             {orbitData && (
               <div style={{ fontSize: '0.9em', color: '#4ecdc4', marginTop: '5px' }}>
                 <strong>Live Tracking:</strong> Azimuth {orbitData.azimuth.toFixed(1)}° | Elevation {orbitData.elevation.toFixed(1)}° | Slant Range {orbitData.slantRange.toFixed(1)} km
@@ -993,6 +1098,7 @@ function App() {
             syncLon={displayCirGroundStation.lon}
             samplePoints={cirSyncState.samplePoints}
             activeSampleIndex={cirSyncState.activeIndex}
+            onSamplePointSelect={setRequestedCirIndex}
           />
         </div>
       )}
