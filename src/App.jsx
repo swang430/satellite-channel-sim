@@ -914,7 +914,8 @@ function App() {
       samplePoints: nextState?.samplePoints || []
     };
     setCirSyncState(mergedState);
-    setRequestedCirIndex(mergedState.activeIndex || 0);
+    // Remove the setRequestedCirIndex call here to prevent feedback loops during playback
+    // setRequestedCirIndex(mergedState.activeIndex || 0);
   }, []);
 
   return (
