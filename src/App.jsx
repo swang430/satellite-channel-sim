@@ -903,7 +903,11 @@ function App() {
 
   const displayCirTleLine1 = cirSyncState.tleLine1 || tleLine1;
   const displayCirTleLine2 = cirSyncState.tleLine2 || tleLine2;
-  const displayCirGroundStation = cirSyncState.groundStation || { lat: syncLat, lon: syncLon, alt: gsAlt };
+  const displayCirGroundStation = {
+    lat: cirSyncState.groundStation?.lat ?? syncLat,
+    lon: cirSyncState.groundStation?.lon ?? syncLon,
+    alt: cirSyncState.groundStation?.alt ?? gsAlt
+  };
 
   const handleChannelGroundStationChange = useCallback((nextGroundStation) => {
     if (nextGroundStation?.lat != null) setSyncLat(nextGroundStation.lat);
