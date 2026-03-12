@@ -505,9 +505,23 @@ function App() {
     setTleFetchError('');
   }
   async function handleExportGoldenTrajectory() {
-    const startTime = new Date();
-    // Use a dense trajectory with 1s step for 20 minutes (enough for a typical pass)
-    const trajectoryConfig = { startTime, durationMs: 20 * 60 * 1000, stepMs: 1000 };
+    // 1. Predict passes to find the exact next visible window (up to 72 hours ahead)
+    const passes = predictPasses(tleLine1, tleLine2, syncLat, syncLon, gsAlt, 72, 0);
+    if (!passes || passes.length === 0) {
+      setTleFetchError('No visible passes found in the next 72h. Cannot generate Golden RT trajectory.');
+      return;
+    }
+    
+    // Take the first upcoming pass
+    const nextPass = passes[0];
+    
+    // Add a 2-minute margin before AOS and after LOS to capture horizon edge effects
+    const startTime = new Date(nextPass.aos.getTime() - 2 * 60 * 1000);
+    const endTime = new Date(nextPass.los.getTime() + 2 * 60 * 1000);
+    const durationMs = endTime.getTime() - startTime.getTime();
+
+    // 2. Use a dense trajectory with 1s step for this specific dynamic window
+    const trajectoryConfig = { startTime, durationMs, stepMs: 1000 };
     const denseTrajectory = generateTrajectoryExport(tleLine1, tleLine2, syncLat, syncLon, gsAlt, trajectoryConfig);
     if (!denseTrajectory || !denseTrajectory.length) {
       setTleFetchError('Failed to generate dense trajectory for RT Golden Export. Check TLE.');
