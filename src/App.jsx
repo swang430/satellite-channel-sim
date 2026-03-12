@@ -504,19 +504,23 @@ function App() {
     setActiveProjectManifest(manifest);
     setTleFetchError('');
   }
-  async function handleExportGoldenTrajectory() {
-    // 1. Predict passes to find the exact next visible window (up to 72 hours ahead)
-    const passes = predictPasses(tleLine1, tleLine2, syncLat, syncLon, gsAlt, 72, 0);
-    if (!passes || passes.length === 0) {
-      setTleFetchError('No visible passes found in the next 72h. Cannot generate Golden RT trajectory.');
-      return;
-    }
+  async function handleExportGoldenTrajectory(specificPass = null) {
+    let bestPass = specificPass;
     
-    // Find the "best" pass (the one with the highest max elevation) to ensure a full NLOS->LOS->NLOS curve
-    let bestPass = passes[0];
-    for (let i = 1; i < passes.length; i++) {
-      if (passes[i].maxElev > bestPass.maxElev) {
-        bestPass = passes[i];
+    if (!bestPass) {
+      // 1. Predict passes to find the exact next visible window (up to 72 hours ahead)
+      const passes = predictPasses(tleLine1, tleLine2, syncLat, syncLon, gsAlt, 72, 0);
+      if (!passes || passes.length === 0) {
+        setTleFetchError('No visible passes found in the next 72h. Cannot generate Golden RT trajectory.');
+        return;
+      }
+      
+      // Find the "best" pass (the one with the highest max elevation) to ensure a full NLOS->LOS->NLOS curve
+      bestPass = passes[0];
+      for (let i = 1; i < passes.length; i++) {
+        if (passes[i].maxElev > bestPass.maxElev) {
+          bestPass = passes[i];
+        }
       }
     }
     
@@ -1067,6 +1071,7 @@ function App() {
                         <th style={{ padding: '6px', border: '1px solid rgba(78,205,196,0.3)' }}>Max Elev</th>
                         <th style={{ padding: '6px', border: '1px solid rgba(78,205,196,0.3)' }}>Duration</th>
                         <th style={{ padding: '6px', border: '1px solid rgba(78,205,196,0.3)' }}>Quality</th>
+                        <th style={{ padding: '6px', border: '1px solid rgba(78,205,196,0.3)', textAlign: 'center' }}>Action</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1083,6 +1088,15 @@ function App() {
                             <td style={{ padding: '4px 6px', border: '1px solid rgba(78,205,196,0.3)', fontWeight: 'bold', color: p.maxElev >= 45 ? '#00ff88' : p.maxElev >= 20 ? '#ffc107' : '#fd7e14' }}>{p.maxElev.toFixed(1)}°</td>
                             <td style={{ padding: '4px 6px', border: '1px solid rgba(78,205,196,0.3)' }}>{mins}m {secs}s</td>
                             <td style={{ padding: '4px 6px', border: '1px solid rgba(78,205,196,0.3)' }}>{quality}</td>
+                            <td style={{ padding: '4px 6px', border: '1px solid rgba(78,205,196,0.3)', textAlign: 'center' }}>
+                              <button 
+                                onClick={() => handleExportGoldenTrajectory(p)}
+                                style={{ padding: '2px 8px', background: '#ffc107', color: '#333', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.85em', fontWeight: 'bold' }}
+                                title="Export Golden RT Trajectory for this specific pass"
+                              >
+                                🌟 Export Golden
+                              </button>
+                            </td>
                           </tr>
                         );
                       })}
