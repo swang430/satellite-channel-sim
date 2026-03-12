@@ -66,7 +66,8 @@ export default function UserManual({ onClose }) {
                             ['6', '天气数据与实时同步'],
                             ['7', '数据导出'],
                             ['8', '校准数据格式规范'],
-                            ['9', '物理常识验证模块']
+                            ['9', '物理常识验证模块'],
+                            ['10', '图电一体化与联动展示']
                         ].map(([n, title]) => (
                             <div key={n} style={{ color: '#aaa' }}>
                                 <span style={{ color: '#4ecdc4', fontWeight: 'bold' }}>{n}.</span> {title}
@@ -391,6 +392,26 @@ export default function UserManual({ onClose }) {
 
                     <h3 style={h3Style}>Web 端 UI 诊断</h3>
                     <p>在信道仿真面板中配置参数并点击 <span style={codeStyle}>🚀 Generate</span> 后，可按键盘 <code style={codeStyle}>F12</code> 打开浏览器控制台 (Console) 查看诊断报告。系统会自动进行理论预算与仿真结果的交叉比对，如发现严重偏离常识的失真（如损耗异常、包络异常），会输出 <span style={{color:'#ff6b6b', fontWeight:'bold'}}>❌ 偏差过大</span> 警告，协助排查参数输入错误。</p>
+                </div>
+
+                {/* 10. 图电一体化 */}
+                <div style={sectionStyle}>
+                    <h2 style={h2Style}>10. 图电一体化与联动展示 (Golden RT & CIR Viewer) 🌟</h2>
+                    <p>系统提供宏观几何视图（轨道预测）与微观电磁视图（射线跟踪 CIR）的强绑定联动能力，直观呈现不同空间遮挡环境下的多径剧变。</p>
+
+                    <h3 style={h3Style}>Golden RT 轨迹提取</h3>
+                    <p>通过 <span style={codeStyle}>🌟 Export Golden RT Trajectory</span>，系统会在一次过境中智能提取 8-10 个关键几何突变点（如入场/出场 15°、遮挡临界 45°、街道波导平行角等），用于导入 HyperRT 等昂贵的射线跟踪平台，从而用最少的算力跑出最显著的特征。</p>
+                    <ul style={{ paddingLeft: '20px', fontSize: '0.9em', color: '#ccc', lineHeight: '1.6' }}>
+                        <li><strong>智能寻找过境</strong>：如果当前无过境，系统会自动在未来 72 小时内寻找最大仰角最高的“完美过境”。</li>
+                        <li><strong>手动选择</strong>：也可在“Pass Prediction”预测结果列表中，手动点击任意一行后方的导出按钮，针对特定恶劣或擦边过境进行提取。</li>
+                    </ul>
+
+                    <h3 style={h3Style}>主从双向联动 (CIR Viewer)</h3>
+                    <ol style={{ paddingLeft: '20px', fontSize: '0.9em', lineHeight: '1.6' }}>
+                        <li><strong>ZIP 导入</strong>：将第三方软件跑出的 <code style={codeStyle}>.mat</code> CIR 结果文件与 <code style={codeStyle}>trajectory.csv</code> / <code style={codeStyle}>manifest.json</code> 放在同一个 ZIP 包中拖入。</li>
+                        <li><strong>空间锚点交互</strong>：点击上方 Skyplot（天空图）或 Ground Track（地面轨迹图）上的黄色节点，下方 CIR 面板会瞬间跳帧至对应的物理时刻。</li>
+                        <li><strong>动态演进播放</strong>：点击 CIR 面板的 <span style={codeStyle}>▶ Play</span>，可按设定的 FPS 动态播放多径瀑布，上方天空图的光标也会同步移动，完美演绎从 NLOS 到 LOS 的传播剧变。</li>
+                    </ol>
                 </div>
 
                 {/* 已知卫星 ID 参考 */}
