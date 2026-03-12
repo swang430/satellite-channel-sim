@@ -384,7 +384,7 @@ export default function ChannelSimPanel({
             const manifestEntry = getZipEntry(zip, 'manifest.json');
             const trajectoryEntry = getZipEntry(zip, 'trajectory.csv');
             const entries = Object.keys(zip.files)
-                .filter(name => name.toLowerCase().endsWith('.mat') && !zip.files[name].dir);
+                .filter(name => name.toLowerCase().endsWith('.mat') && !zip.files[name].dir && !name.includes('__MACOSX'));
 
             if (entries.length === 0) {
                 setStatusMsg('\u26a0\ufe0f No .mat files found in ZIP');
