@@ -505,7 +505,9 @@ function App() {
     setTleFetchError('');
   }
   async function handleExportGoldenTrajectory(specificPass = null) {
-    let bestPass = specificPass;
+    // If the click event object is passed by mistake instead of a pass object, ignore it
+    const isValidPass = specificPass && specificPass.aos && specificPass.los;
+    let bestPass = isValidPass ? specificPass : null;
     
     if (!bestPass) {
       // 1. Predict passes to find the exact next visible window (up to 72 hours ahead)
