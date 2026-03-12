@@ -704,32 +704,56 @@ export default function ChannelSimPanel({
         }
 
         const colors = ['#00ff88', '#ff6b6b', '#4ecdc4', '#f7dc6f', '#bb8fce'];
+        
+        // Decluttering logic for dense CIR data (like from Ray Tracing)
+        const isDense = taps.length > 15;
+        // Identify top N strongest paths to keep them prominent and labeled
+        const topTaps = new Set([...taps].sort((a, b) => b.amplitude_dB - a.amplitude_dB).slice(0, 5));
+
         taps.forEach((tap, i) => {
             const x = padL + (tap.excessDelay_ns / maxExcessDelay) * plotW;
             const relPower = tap.amplitude_dB - losPower;
             const normY = Math.max(0, Math.min(1, -relPower / Math.abs(minDb)));
             const y = padT + normY * plotH;
-            const color = colors[i % colors.length];
+            
+            const isStrong = topTaps.has(tap) || i === 0; // Ensure LOS (i=0) and strongest paths are highlighted
 
-            ctx.strokeStyle = color;
-            ctx.lineWidth = 2;
+            let colorStr = colors[i % colors.length];
+            if (isDense && !isStrong) {
+                colorStr = 'rgba(120, 150, 180, 0.4)'; // Dim weaker paths in dense mode
+            }
+
+            ctx.strokeStyle = colorStr;
+            ctx.lineWidth = (isDense && !isStrong) ? 0.8 : 2;
             ctx.beginPath();
             ctx.moveTo(x, padT + plotH);
             ctx.lineTo(x, y);
             ctx.stroke();
 
-            ctx.fillStyle = color;
+            ctx.fillStyle = colorStr;
             ctx.beginPath();
-            ctx.arc(x, y, 4, 0, Math.PI * 2);
+            ctx.arc(x, y, (isDense && !isStrong) ? 1.5 : 4, 0, Math.PI * 2);
             ctx.fill();
 
-            ctx.fillStyle = '#fff';
-            ctx.font = '9px sans-serif';
-            ctx.textAlign = 'center';
-            const labelY = y - 10 < padT ? y + 15 : y - 10;
-            ctx.fillText(tap.label, x, labelY);
-            ctx.fillStyle = '#aaa';
-            ctx.fillText(relPower.toFixed(1) + 'dB', x, labelY + 11);
+            // Label collision avoidance: only label strong paths when dense
+            if (!isDense || isStrong) {
+                ctx.fillStyle = '#fff';
+                ctx.font = isDense ? '8px sans-serif' : '9px sans-serif';
+                ctx.textAlign = 'center';
+                const labelY = y - 10 < padT ? y + 15 : y - 10;
+                
+                // Add a semi-transparent background to labels in dense mode to improve readability over other lines
+                if (isDense) {
+                    const textW = ctx.measureText(tap.label).width;
+                    ctx.fillStyle = 'rgba(10, 10, 26, 0.7)';
+                    ctx.fillRect(x - textW / 2 - 2, labelY - 8, textW + 4, 22);
+                    ctx.fillStyle = '#fff';
+                }
+                
+                ctx.fillText(tap.label, x, labelY);
+                ctx.fillStyle = '#aaa';
+                ctx.fillText(relPower.toFixed(1) + 'dB', x, labelY + 11);
+            }
         });
 
         ctx.fillStyle = '#fff';
