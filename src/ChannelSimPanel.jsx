@@ -603,13 +603,16 @@ export default function ChannelSimPanel({
         }
     }, [timeline.length, cirIdx]);
 
+    const prevRequestedIdxRef = useRef(requestedCirIndex);
     useEffect(() => {
         if (!Number.isInteger(requestedCirIndex)) return;
         if (requestedCirIndex < 0 || requestedCirIndex >= timeline.length) return;
-        if (requestedCirIndex === cirIdx) return;
-        setIsCirPlaying(false);
-        setCirIdx(requestedCirIndex);
-    }, [requestedCirIndex, timeline.length, cirIdx]);
+        if (prevRequestedIdxRef.current !== requestedCirIndex) {
+            prevRequestedIdxRef.current = requestedCirIndex;
+            setIsCirPlaying(false);
+            setCirIdx(requestedCirIndex);
+        }
+    }, [requestedCirIndex, timeline.length]);
 
     useEffect(() => {
         onCirSyncStateChange?.({
