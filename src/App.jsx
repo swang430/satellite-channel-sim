@@ -512,12 +512,17 @@ function App() {
       return;
     }
     
-    // Take the first upcoming pass
-    const nextPass = passes[0];
+    // Find the "best" pass (the one with the highest max elevation) to ensure a full NLOS->LOS->NLOS curve
+    let bestPass = passes[0];
+    for (let i = 1; i < passes.length; i++) {
+      if (passes[i].maxElev > bestPass.maxElev) {
+        bestPass = passes[i];
+      }
+    }
     
     // Add a 2-minute margin before AOS and after LOS to capture horizon edge effects
-    const startTime = new Date(nextPass.aos.getTime() - 2 * 60 * 1000);
-    const endTime = new Date(nextPass.los.getTime() + 2 * 60 * 1000);
+    const startTime = new Date(bestPass.aos.getTime() - 2 * 60 * 1000);
+    const endTime = new Date(bestPass.los.getTime() + 2 * 60 * 1000);
     const durationMs = endTime.getTime() - startTime.getTime();
 
     // 2. Use a dense trajectory with 1s step for this specific dynamic window
