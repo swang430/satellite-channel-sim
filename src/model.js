@@ -1148,32 +1148,20 @@ export function extractGoldenTrajectory(denseTrajectory, streetAzimuth = null) {
   const goldenPoints = [];
   const thresholds = [15, 30, 45, 60];
   
-  // Track crossings
-  const addThresholdCrossings = (startIdx, endIdx, isAscending) => {
-    let currentThreshIdx = isAscending ? 0 : thresholds.length - 1;
-    let step = isAscending ? 1 : -1;
-    
-    for (let i = startIdx; isAscending ? i <= endIdx : i >= endIdx; isAscending ? i++ : i--) {
-      const pt = sorted[i];
-      if (currentThreshIdx >= 0 && currentThreshIdx < thresholds.length) {
-        const targetElev = thresholds[currentThreshIdx];
-        const passed = isAscending ? (pt.elevation >= targetElev) : (pt.elevation <= targetElev);
-        
-        if (passed) {
-          goldenPoints.push({
-            ...pt,
-            feature: `Elev_${targetElev}_${isAscending ? 'Asc' : 'Desc'}`,
-            description: targetElev === 15 ? (isAscending ? 'AOS Entry (Low Elev)' : 'LOS Exit (Low Elev)') 
-                       : targetElev === 45 ? 'Building Blockage Threshold' 
-                       : `Mid Elev ${targetElev}`
-          });
-          currentThreshIdx += step;
-        }
-      }
+  // Ascending phase (0 to maxElevIdx)
+  let ascThreshIdx = 0;
+  for (let i = 0; i <= maxElevIdx; i++) {
+    const pt = sorted[i];
+    while (ascThreshIdx < thresholds.length && pt.elevation >= thresholds[ascThreshIdx]) {
+      const targetElev = thresholds[ascThreshIdx];
+      goldenPoints.push({
+        ...pt,
+        feature: `Elev_${targetElev}_Asc`,
+        description: targetElev === 15 ? 'AOS Entry (Low Elev)' : targetElev === 45 ? 'Building Blockage Threshold' : `Mid Elev ${targetElev}`
+      });
+      ascThreshIdx++;
     }
-  };
-  
-  addThresholdCrossings(0, maxElevIdx, true); // Ascending
+  }
   
   goldenPoints.push({
     ...maxElevPoint,
@@ -1181,7 +1169,25 @@ export function extractGoldenTrajectory(denseTrajectory, streetAzimuth = null) {
     description: 'Zenith / Shortest Path (Benchmark LOS)'
   });
   
-  addThresholdCrossings(sorted.length - 1, maxElevIdx + 1, false); // Descending
+  // Descending phase (maxElevIdx to end)
+  let descThreshIdx = thresholds.length - 1;
+  // Skip thresholds that were never reached by this pass
+  while (descThreshIdx >= 0 && maxElevPoint.elevation < thresholds[descThreshIdx]) {
+    descThreshIdx--;
+  }
+
+  for (let i = maxElevIdx + 1; i < sorted.length; i++) {
+    const pt = sorted[i];
+    while (descThreshIdx >= 0 && pt.elevation <= thresholds[descThreshIdx]) {
+      const targetElev = thresholds[descThreshIdx];
+      goldenPoints.push({
+        ...pt,
+        feature: `Elev_${targetElev}_Desc`,
+        description: targetElev === 15 ? 'LOS Exit (Low Elev)' : targetElev === 45 ? 'Building Blockage Threshold' : `Mid Elev ${targetElev}`
+      });
+      descThreshIdx--;
+    }
+  }
   
   // Street Azimuth (Parallel / Perpendicular)
   if (streetAzimuth !== null && streetAzimuth !== undefined && streetAzimuth !== '') {
