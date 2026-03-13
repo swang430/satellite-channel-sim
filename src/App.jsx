@@ -943,7 +943,6 @@ function App() {
           }}
         >📖 使用手册</button>
       </div>
-      <p>Simulating Rain Fade & Depolarization (Ka-Band Example) with Data Calibration</p>
 
       <div className="orbit-controls" style={{ padding: '15px', border: '1px solid rgba(78,205,196,0.5)', borderRadius: '5px', marginBottom: '20px', background: 'linear-gradient(135deg, #0a0a2e 0%, #1a1a3e 100%)', textAlign: 'left', color: '#eee' }}>
         <h3>🛰️ Satellite Orbit Configuration (SGP4)</h3>
