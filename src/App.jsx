@@ -1010,33 +1010,42 @@ function App() {
 
             <input type="text" value={tleLine1} onChange={e => setTleLine1(e.target.value)} placeholder="TLE Line 1" style={{ width: '100%', fontFamily: 'monospace', fontSize: '0.9em' }} />
             <input type="text" value={tleLine2} onChange={e => setTleLine2(e.target.value)} placeholder="TLE Line 2" style={{ width: '100%', fontFamily: 'monospace', fontSize: '0.9em' }} />
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginTop: '2px' }}>
-              <button
-                onClick={handleExportWgs84Trajectory}
-                style={{ padding: '4px 12px', background: '#138496', color: 'white', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}
-              >
-                ⬇️ Export Simulation Project
-              </button>
-              <small style={{ color: '#666' }}>60s window, 1ms interval, starting from now (ZIP: trajectory.csv + manifest.json)</small>
-              {activeProjectManifest && (
-                <small style={{ color: '#4ecdc4' }}>
-                  Task_ID: {activeProjectManifest.Task_ID.slice(0, 8)}...
-                </small>
-              )}
+            
+            {/* Export Actions Group */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px', padding: '10px', border: '1px dashed rgba(255,193,7,0.5)', borderRadius: '5px', background: 'rgba(0,0,0,0.2)' }}>
+              <strong style={{ color: '#ffc107', fontSize: '0.95em' }}>📦 Project Export & Trajectory Generation</strong>
+              
+              {/* Golden RT Export */}
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <button
+                  onClick={handleExportGoldenTrajectory}
+                  style={{ padding: '4px 12px', background: '#ffc107', color: '#333', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}
+                >
+                  🌟 Export Golden RT Trajectory (Non-Uniform)
+                </button>
+                <label style={{ whiteSpace: 'nowrap', fontSize: '0.9em', color: '#ccc' }}>
+                  Street Azimuth (°): <input type="number" value={streetAzimuth} onChange={e => setStreetAzimuth(e.target.value)} placeholder="e.g. 0 for N-S" style={{ width: '80px', fontFamily: 'monospace', marginLeft: '4px' }} />
+                </label>
+                <small style={{ color: '#aaa', width: '100%' }}>Extracts 8-10 geometric key points from the best next 72h pass for external Ray-Tracing engines.</small>
+              </div>
+
+              {/* Standard WGS84 Export */}
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginTop: '4px' }}>
+                <button
+                  onClick={handleExportWgs84Trajectory}
+                  style={{ padding: '4px 12px', background: '#138496', color: 'white', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}
+                >
+                  ⬇️ Export Simulation Project (Dense)
+                </button>
+                <small style={{ color: '#666' }}>60s window, 1ms interval, starting from NOW.</small>
+                {activeProjectManifest && (
+                  <small style={{ color: '#4ecdc4', width: '100%' }}>
+                    Active Task_ID: {activeProjectManifest.Task_ID.slice(0, 8)}...
+                  </small>
+                )}
+              </div>
             </div>
 
-            {/* Golden RT Export */}
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginTop: '10px', padding: '8px', border: '1px solid #ffc107', borderRadius: '4px', background: 'rgba(255,193,7,0.1)' }}>
-              <label style={{ whiteSpace: 'nowrap', fontWeight: 'bold', color: '#ffc107' }}>🏙️ Street Azimuth (°):</label>
-              <input type="number" value={streetAzimuth} onChange={e => setStreetAzimuth(e.target.value)} placeholder="e.g. 0 for N-S" style={{ width: '120px', fontFamily: 'monospace' }} />
-              <button
-                onClick={handleExportGoldenTrajectory}
-                style={{ padding: '4px 12px', background: '#ffc107', color: '#333', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}
-              >
-                🌟 Export Golden RT Trajectory (Non-Uniform)
-              </button>
-              <small style={{ color: '#aaa' }}>Extracts 8-10 geometric key points from a 20-min pass for RT engines.</small>
-            </div>
             {orbitData && (
               <div style={{ fontSize: '0.9em', color: '#4ecdc4', marginTop: '5px' }}>
                 <strong>Live Tracking:</strong> Azimuth {orbitData.azimuth.toFixed(1)}° | Elevation {orbitData.elevation.toFixed(1)}° | Slant Range {orbitData.slantRange.toFixed(1)} km
