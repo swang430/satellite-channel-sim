@@ -869,6 +869,91 @@ export function computeCIR(params) {
 }
 
 // === 信道传播时间序列生成器 ===
+export function generateChannelTimeSeriesForTimestamps(
+  tleLine1, tleLine2,
+  observerLat, observerLon, observerAlt,
+  timestamps,
+  linkParams = {}
+) {
+  try {
+    const satrec = satellite.twoline2satrec(tleLine1, tleLine2);
+    const observerGd = {
+      longitude: satellite.degreesToRadians(observerLon),
+      latitude: satellite.degreesToRadians(observerLat),
+      height: observerAlt / 1000.0
+    };
+
+    const k_boltzmann = 1.380649e-23;
+    const timeline = [];
+    let frameIndex = 0;
+
+    for (const date of timestamps) {
+      const pv = satellite.propagate(satrec, date);
+      if (!pv.position) { frameIndex++; continue; }
+
+      const gmst = satellite.gstime(date);
+      const ecf = satellite.eciToEcf(pv.position, gmst);
+      const geodetic = satellite.eciToGeodetic(pv.position, gmst);
+      const la = satellite.ecfToLookAngles(observerGd, ecf);
+      const elev = satellite.radiansToDegrees(la.elevation);
+      const az = satellite.radiansToDegrees(la.azimuth);
+      const range = la.rangeSat;
+
+      // 仿真时间（秒），用于 SoS 确定性衰落。如果是非均匀采样，simTimeSec的意义减弱，这里按累加时间或直接用第一帧的相对时间
+      const simTimeSec = (date.getTime() - timestamps[0].getTime()) / 1000.0;
+
+      const lbParams = {
+        ...linkParams,
+        elevation: Math.max(0.1, elev),
+        slantRange: range,
+        simTime: linkParams.disableFastFading ? 0 : simTimeSec
+      };
+      const lb = calculateLinkBudget(lbParams);
+
+      const absoluteFspl = 20 * Math.log10(range) + 20 * Math.log10(linkParams.freq || 30) + 92.45;
+      const eirp = linkParams.eirp || 60.0;
+      const gRx = linkParams.gRx || 42.0;
+      const tRx = linkParams.tRx || 150.0;
+      const bwMHz = linkParams.bandwidth || 400.0;
+
+      const absoluteLoss = lb.totalAtmosphericLoss + lb.fadeLMS + lb.lossFaraday
+        + lb.pointingLoss + (lb.scanLoss || 0) + (lb.multipathLoss || 0)
+        + (lb.scintLoss || 0) + absoluteFspl;
+      const rxPowerDbm = eirp + 30 - absoluteLoss + gRx;
+
+      const tSys = tRx + lb.tSky + 3.0;
+      const noisePowerW = k_boltzmann * tSys * (bwMHz * 1e6);
+      const noiseFloorDbm = 10 * Math.log10(noisePowerW) + 30;
+      const snrDb = Math.max(-30, rxPowerDbm - noiseFloorDbm);
+
+      const { capRank2, capRank1 } = calculateMIMOCapacity(snrDb, lb.xpd);
+      const cir = computeCIR({ ...lbParams, freq: linkParams.freq || 30 });
+
+      timeline.push({
+        time: date,
+        timeLabel: date.toLocaleTimeString(),
+        frameIndex,
+        elevation: elev, azimuth: az, slantRange: range,
+        satLat: satellite.radiansToDegrees(geodetic.latitude),
+        satLon: satellite.radiansToDegrees(geodetic.longitude),
+        satAlt: geodetic.height,
+        apparentElevation: lb.apparentElevation,
+        absoluteFspl, rxPowerDbm, noiseFloorDbm, snrDb,
+        attRain: lb.attRain, attGas: lb.attGas, attCloud: lb.attCloud, totalAtmosphericLoss: lb.totalAtmosphericLoss,
+        fadeLMS: lb.fadeLMS, lossFaraday: lb.lossFaraday, pointingLoss: lb.pointingLoss,
+        scanLoss: lb.scanLoss || 0, multipathLoss: lb.multipathLoss || 0, scintLoss: lb.scintLoss || 0, tSky: lb.tSky,
+        xpd: lb.xpd, capRank1, capRank2, groupDelayNs: lb.groupDelayNs, dispersionNs: lb.dispersionNs,
+        cir
+      });
+      frameIndex++;
+    }
+    return timeline;
+  } catch (e) {
+    console.error('Channel TimeSeries For Timestamps Error:', e);
+    return [];
+  }
+}
+
 export function generateChannelTimeSeries(
   tleLine1, tleLine2,
   observerLat, observerLon, observerAlt,

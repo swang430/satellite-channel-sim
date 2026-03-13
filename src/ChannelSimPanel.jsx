@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Line, Bar } from 'react-chartjs-2';
 import JSZip from 'jszip';
 import { read as readMat } from 'mat-for-js';
-import { generateChannelTimeSeries, generateTrajectoryExport, predictPasses, calibrateModel, applyCalibration, createDefaultCalibration, getCalibParamDefs } from './model.js';
+import { generateChannelTimeSeries, generateChannelTimeSeriesForTimestamps, generateTrajectoryExport, predictPasses, calibrateModel, applyCalibration, createDefaultCalibration, getCalibParamDefs } from './model.js';
 import { getSatelliteList, getSatelliteBandParams } from './knownSatellites.js';
 import { SimulationValidator } from './ValidationModule.js';
 import { parseTrajectoryCsv } from './projectSync.js';
@@ -145,12 +145,23 @@ export default function ChannelSimPanel({
             if (useCalibration && calibProfile.calibrated) {
                 linkParams = applyCalibration(linkParams, calibProfile);
             }
-            const result = generateChannelTimeSeries(
-                tleLine1, tleLine2,
-                gsLat, gsLon, gsAlt,
-                startTime, endTime, stepSec,
-                linkParams
-            );
+            let result;
+            if (linkedTrajectorySamples && linkedTrajectorySamples.length > 0) {
+                const timestamps = linkedTrajectorySamples.map(s => new Date(s.time));
+                result = generateChannelTimeSeriesForTimestamps(
+                    tleLine1, tleLine2,
+                    gsLat, gsLon, gsAlt,
+                    timestamps,
+                    linkParams
+                );
+            } else {
+                result = generateChannelTimeSeries(
+                    tleLine1, tleLine2,
+                    gsLat, gsLon, gsAlt,
+                    startTime, endTime, stepSec,
+                    linkParams
+                );
+            }
             const trajectorySamples = buildTrajectorySamplesFromTimeline(result);
             setGeneratedTimeline(result);
             setGeneratedTrajectorySamples(trajectorySamples);
