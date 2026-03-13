@@ -946,10 +946,17 @@ function App() {
 
       <div className="orbit-controls" style={{ padding: '15px', border: '1px solid rgba(78,205,196,0.5)', borderRadius: '5px', marginBottom: '20px', background: 'linear-gradient(135deg, #0a0a2e 0%, #1a1a3e 100%)', textAlign: 'left', color: '#eee' }}>
         <h3>🛰️ Satellite Orbit Configuration (SGP4)</h3>
-        <label style={{ display: 'block', marginBottom: '10px', cursor: 'pointer' }}>
-          <input type="checkbox" checked={isDynamicOrbit} onChange={e => setIsDynamicOrbit(e.target.checked)} />
-          <strong style={{ marginLeft: '8px' }}>Enable Real-time Orbit Tracking</strong>
-        </label>
+        <div style={{ display: 'flex', gap: '20px', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap' }}>
+          <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+            <input type="checkbox" checked={isDynamicOrbit} onChange={e => setIsDynamicOrbit(e.target.checked)} />
+            <strong style={{ marginLeft: '8px' }}>Enable Real-time Orbit Tracking</strong>
+          </label>
+          {/* Fast Fading Toggle moved to the same line */}
+          <label style={{ display: 'flex', gap: '6px', alignItems: 'center', cursor: 'pointer' }}>
+            <input type="checkbox" checked={disableFastFading} onChange={e => setDisableFastFading(e.target.checked)} />
+            <span>🚫 Disable Fast Fading (Scintillation)</span>
+          </label>
+        </div>
         {isDynamicOrbit && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {/* Ground Station Configuration */}
@@ -965,12 +972,7 @@ function App() {
                 <input type="number" step="1" value={gsAlt} onChange={e => setGsAlt(parseFloat(e.target.value) || 0)} style={{ width: '65px', marginLeft: '4px', fontFamily: 'monospace' }} />
               </label>
             </div>
-            {/* Fast Fading Toggle */}
-            <label style={{ display: 'flex', gap: '6px', alignItems: 'center', cursor: 'pointer' }}>
-              <input type="checkbox" checked={disableFastFading} onChange={e => setDisableFastFading(e.target.checked)} />
-              <span>🚫 Disable Fast Fading (Scintillation)</span>
-              <small style={{ color: '#888' }}>— recommended for smooth replay</small>
-            </label>
+            
             {/* Milestone 20: Satellite Preset Dropdown */}
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
               <label style={{ whiteSpace: 'nowrap', fontWeight: 'bold' }}>📡 Quick Select:</label>
