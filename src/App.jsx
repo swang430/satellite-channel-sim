@@ -1165,6 +1165,21 @@ function App() {
         </div>
       )}
 
+
+      {/* === 信道传播仿真面板 === */}
+      <ChannelSimPanel
+        tleLine1={tleLine1}
+        tleLine2={tleLine2}
+        satName={satName}
+        globalParams={params}
+        groundStation={{ lat: syncLat, lon: syncLon, alt: gsAlt }}
+        onGroundStationChange={handleChannelGroundStationChange}
+        activeProjectManifest={activeProjectManifest}
+        requestedCirIndex={requestedCirIndex}
+        onCirSyncStateChange={handleCirSyncStateChange}
+      />
+
+
       {/* Milestone 23: Historical Replay Panel */}
       {isDynamicOrbit && (
         <div style={{ padding: '15px', border: '1px solid #555', borderRadius: '5px', marginBottom: '20px', background: '#1a1a2e', color: '#eee', textAlign: 'left' }}>
@@ -1431,19 +1446,6 @@ function App() {
         </div>
         {fittingInfo && <p className="info-text">{fittingInfo}</p>}
       </div>
-
-      {/* === 信道传播仿真面板 === */}
-      <ChannelSimPanel
-        tleLine1={tleLine1}
-        tleLine2={tleLine2}
-        satName={satName}
-        globalParams={params}
-        groundStation={{ lat: syncLat, lon: syncLon, alt: gsAlt }}
-        onGroundStationChange={handleChannelGroundStationChange}
-        activeProjectManifest={activeProjectManifest}
-        requestedCirIndex={requestedCirIndex}
-        onCirSyncStateChange={handleCirSyncStateChange}
-      />
 
       {/* === 使用手册浮层 === */}
       {showManual && <UserManual onClose={() => setShowManual(false)} />}
