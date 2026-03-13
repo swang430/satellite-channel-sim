@@ -55,8 +55,12 @@ export default function ChannelSimPanel({
     const [calibMetadata, setCalibMetadata] = useState(null);
 
     // === Output State ===
-    const [timeline, setTimeline] = useState([]);
+    const [importedTimeline, setImportedTimeline] = useState([]);
+    const [viewMode, setViewMode] = useState('imported'); // 'native' | 'imported'
     const [generatedTimeline, setGeneratedTimeline] = useState([]);
+    
+    const timeline = viewMode === 'imported' && importedTimeline.length > 0 ? importedTimeline : generatedTimeline;
+    
     const [generatedTrajectorySamples, setGeneratedTrajectorySamples] = useState([]);
     const [computing, setComputing] = useState(false);
     const [cirIdx, setCirIdx] = useState(0);
@@ -150,13 +154,15 @@ export default function ChannelSimPanel({
             const trajectorySamples = buildTrajectorySamplesFromTimeline(result);
             setGeneratedTimeline(result);
             setGeneratedTrajectorySamples(trajectorySamples);
-            setTimeline(result);
+            // setTimeline(result); // Derived dynamically now
             setImportInfo(null);
             setIsStandaloneMode(false);
             setLinkedTrajectorySamples([]);
             setHandshakeInfo(null);
             setLinkedViewerTle({ tleLine1: '', tleLine2: '' });
             setLinkedGroundStation(null);
+            setImportedTimeline([]);
+            setViewMode('native');
             setIsCirPlaying(false);
             setCirIdx(0);
             const visibleFrames = result.filter(f => f.elevation > 0);
@@ -536,7 +542,8 @@ export default function ChannelSimPanel({
                 ? frames.map((frame, index) => applyTrajectoryToFrame(frame, handshakeSamples[index], index))
                 : frames;
 
-            setTimeline(linkedFrames);
+            setImportedTimeline(linkedFrames);
+            setViewMode('imported');
             setIsCirPlaying(false);
             setCirIdx(0);
             setImportInfo({
@@ -872,12 +879,12 @@ export default function ChannelSimPanel({
         setHandshakeInfo(null);
         setLinkedViewerTle({ tleLine1: '', tleLine2: '' });
         setLinkedGroundStation(null);
+        setImportedTimeline([]);
+        setViewMode('native');
         if (generatedTimeline.length > 0) {
-            setTimeline(generatedTimeline);
             setCirIdx(Math.min(cirIdx, Math.max(0, generatedTimeline.length - 1)));
             setStatusMsg('Cleared imported CIR and restored the generated channel timeline.');
         } else {
-            setTimeline([]);
             setCirIdx(0);
             setStatusMsg('Cleared imported CIR.');
         }
@@ -1604,6 +1611,20 @@ export default function ChannelSimPanel({
                             </button>
                             <span style={{ fontSize: '0.85em', color: '#aaa' }}>FPS</span>
                             <input type="number" min={1} max={60} value={cirFps} onChange={e => setCirFps(parseInt(e.target.value || '5'))} style={{ width: '70px' }} />
+
+                            {importedTimeline.length > 0 && generatedTimeline.length > 0 && (
+                                <button
+                                    onClick={() => setViewMode(m => m === 'native' ? 'imported' : 'native')}
+                                    style={{
+                                        padding: '4px 10px', borderRadius: '4px', cursor: 'pointer',
+                                        background: 'rgba(255,255,255,0.1)', color: '#fff', border: '1px solid rgba(255,255,255,0.3)',
+                                        marginLeft: '10px', fontSize: '0.85em', display: 'flex', alignItems: 'center', gap: '5px'
+                                    }}
+                                    title="Toggle between natively generated SGP4 CIR and imported Ray-Tracing CIR"
+                                >
+                                    🔄 {viewMode === 'native' ? 'View: Native CIR' : 'View: RT CIR (Imported)'}
+                                </button>
+                            )}
 
                             <input
                                 type="range"
