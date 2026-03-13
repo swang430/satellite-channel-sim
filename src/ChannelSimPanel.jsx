@@ -154,14 +154,8 @@ export default function ChannelSimPanel({
             const trajectorySamples = buildTrajectorySamplesFromTimeline(result);
             setGeneratedTimeline(result);
             setGeneratedTrajectorySamples(trajectorySamples);
-            // setTimeline(result); // Derived dynamically now
-            setImportInfo(null);
-            setIsStandaloneMode(false);
-            setLinkedTrajectorySamples([]);
-            setHandshakeInfo(null);
-            setLinkedViewerTle({ tleLine1: '', tleLine2: '' });
-            setLinkedGroundStation(null);
-            setImportedTimeline([]);
+            // We DO NOT clear importInfo or importedTimeline here, 
+            // so we preserve the A/B comparison state if the user generates native *after* importing
             setViewMode('native');
             setIsCirPlaying(false);
             setCirIdx(0);
