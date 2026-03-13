@@ -79,9 +79,9 @@ export function parseTrajectoryCsv(csvText) {
   const latIdx = getIndex(['satlat_deg', 'latitude (deg)', 'latitude_deg']);
   const lonIdx = getIndex(['satlon_deg', 'longitude (deg)', 'longitude_deg']);
   const altIdx = getIndex(['satalt_km', 'altitude (km)', 'altitude_km']);
-  const azIdx = getIndex(['azimuth_deg']);
-  const elevIdx = getIndex(['elevation_deg']);
-  const rangeIdx = getIndex(['slantrange_km', 'range_km']);
+  const azIdx = getIndex(['azimuth_deg', 'azimuth (deg)']);
+  const elevIdx = getIndex(['elevation_deg', 'elevation (deg)']);
+  const rangeIdx = getIndex(['slantrange_km', 'range_km', 'slant range (km)']);
 
   return lines.slice(1).map((line, index) => {
     const cols = line.split(',').map((item) => item.trim());
