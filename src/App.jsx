@@ -575,11 +575,18 @@ function App() {
 
     const zip = new JSZip();
     
-    // Add feature/description columns to the CSV
-    const csvHeader = 'Timestamp,Latitude (deg),Longitude (deg),Altitude (km),Azimuth (deg),Elevation (deg),Slant Range (km),Feature,Description\n';
+    // Add feature/description columns to the CSV, plus the new Effective Altitude
+    const csvHeader = 'Timestamp,Latitude (deg),Longitude (deg),Altitude (km),Azimuth (deg),Elevation (deg),Slant Range (km),Effective Altitude (km),Feature,Description\n';
     const csvRows = goldenPoints.map(p => {
       const ts = p.time || p.timestamp || '';
-      return `${ts},${(p.satLat||0).toFixed(6)},${(p.satLon||0).toFixed(6)},${(p.satAlt||0).toFixed(3)},${(p.azimuth||0).toFixed(2)},${(p.elevation||0).toFixed(2)},${(p.range||0).toFixed(2)},"${p.feature||''}","${p.description||''}"`;
+      // Effective Altitude = Slant Range * sin(Elevation)
+      // This is crucial to "trick" local plane-based Ray Tracing engines into calculating the correct absolute delay and FSPL
+      const elevRad = Math.max(0, p.elevation || 0) * Math.PI / 180;
+      const effectiveAlt = (p.range || 0) * Math.sin(elevRad);
+      
+      const exportedAlt = applyEffectiveAlt ? effectiveAlt.toFixed(3) : (p.satAlt || 0).toFixed(3);
+      
+      return `${ts},${(p.satLat||0).toFixed(6)},${(p.satLon||0).toFixed(6)},${exportedAlt},${(p.azimuth||0).toFixed(2)},${(p.elevation||0).toFixed(2)},${(p.range||0).toFixed(2)},${effectiveAlt.toFixed(3)},"${p.feature||''}","${p.description||''}"`;
     });
     zip.file('trajectory.csv', csvHeader + csvRows.join('\n'));
     zip.file('manifest.json', JSON.stringify(manifest, null, 2));
@@ -599,6 +606,7 @@ function App() {
 
   const [satName, setSatName] = useState('ISS (ZARYA)');
   const [streetAzimuth, setStreetAzimuth] = useState('');
+  const [applyEffectiveAlt, setApplyEffectiveAlt] = useState(true);
   const [noradId, setNoradId] = useState('25544');
   const [tleFetching, setTleFetching] = useState(false);
   const [tleFetchError, setTleFetchError] = useState('');
@@ -1025,6 +1033,10 @@ function App() {
                 </button>
                 <label style={{ whiteSpace: 'nowrap', fontSize: '0.9em', color: '#ccc' }}>
                   Street Azimuth (°): <input type="number" value={streetAzimuth} onChange={e => setStreetAzimuth(e.target.value)} placeholder="e.g. 0 for N-S" style={{ width: '80px', fontFamily: 'monospace', marginLeft: '4px' }} />
+                </label>
+                <label style={{ display: 'flex', gap: '6px', alignItems: 'center', cursor: 'pointer', fontSize: '0.9em', color: '#f39c12', marginLeft: '8px', borderLeft: '1px solid rgba(255,255,255,0.2)', paddingLeft: '8px' }}>
+                  <input type="checkbox" checked={applyEffectiveAlt} onChange={e => setApplyEffectiveAlt(e.target.checked)} />
+                  <span title="Replace absolute Altitude with Effective Altitude (SlantRange * sin(Elev)) to correct delays in planar RT engines.">Apply Effective Altitude for Planar RT</span>
                 </label>
                 <small style={{ color: '#aaa', width: '100%' }}>Extracts 8-10 geometric key points from the best next 72h pass for external Ray-Tracing engines.</small>
               </div>
