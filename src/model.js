@@ -907,7 +907,15 @@ export function generateChannelTimeSeriesForTimestamps(
       const az = satellite.radiansToDegrees(la.azimuth);
       const range = la.rangeSat;
 
-      // 仿真时间（秒），用于 SoS 确定性衰落。如果是非均匀采样，simTimeSec的意义减弱，这里按累加时间或直接用第一帧的相对时间
+      // === Doppler ===
+      const velEcf = satellite.eciToEcf(pv.velocity, gmst);
+      const obsEcfPos = satellite.geodeticToEcf(observerGd);
+      const satEcfPos = ecf;
+      const losX = obsEcfPos.x - satEcfPos.x, losY = obsEcfPos.y - satEcfPos.y, losZ = obsEcfPos.z - satEcfPos.z;
+      const losMag = Math.sqrt(losX*losX + losY*losY + losZ*losZ);
+      const vRadial = losMag > 0 ? (velEcf.x*losX + velEcf.y*losY + velEcf.z*losZ) / losMag : 0;
+      const dopplerHz = ((linkParams.freq || 30) * 1e9) * (vRadial * 1000) / 299792458;
+
       const simTimeSec = (date.getTime() - timestamps[0].getTime()) / 1000.0;
 
       const lbParams = {
@@ -935,7 +943,7 @@ export function generateChannelTimeSeriesForTimestamps(
       const snrDb = Math.max(-30, rxPowerDbm - noiseFloorDbm);
 
       const { capRank2, capRank1 } = calculateMIMOCapacity(snrDb, lb.xpd);
-      const cir = computeCIR({ ...lbParams, freq: linkParams.freq || 30 });
+      const cir = computeCIR({ ...lbParams, freq: linkParams.freq || 30, satAlt: geodetic.height });
 
       timeline.push({
         time: date,
@@ -951,7 +959,8 @@ export function generateChannelTimeSeriesForTimestamps(
         fadeLMS: lb.fadeLMS, lossFaraday: lb.lossFaraday, pointingLoss: lb.pointingLoss,
         scanLoss: lb.scanLoss || 0, multipathLoss: lb.multipathLoss || 0, scintLoss: lb.scintLoss || 0, tSky: lb.tSky,
         xpd: lb.xpd, capRank1, capRank2, groupDelayNs: lb.groupDelayNs, dispersionNs: lb.dispersionNs,
-        cir
+        cir,
+        dopplerHz: isNaN(dopplerHz) ? 0 : dopplerHz
       });
       frameIndex++;
     }
@@ -1095,7 +1104,7 @@ export function generateChannelTimeSeries(
         // CIR
         cir,
         // Doppler
-        dopplerHz: safeNum ? safeNum(dopplerHz, 0) : (isNaN(dopplerHz) ? 0 : dopplerHz)
+        dopplerHz: isNaN(dopplerHz) ? 0 : dopplerHz
       });
 
       frameIndex++;
