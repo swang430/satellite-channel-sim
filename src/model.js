@@ -730,11 +730,21 @@ export function getCalibParamDefs() {
 const C_M_S = 299792458; // 光速 (m/s)
 
 export function computeCIR(params) {
-  const { freq, elevation, slantRange, env, tec = 50, rainRate = 0, correctionFactor = 1.0, hpbw = 2.0, simTime = 0 } = params;
-
+  const { freq, elevation, slantRange: inputSlantRange, env, tec = 50, rainRate = 0, correctionFactor = 1.0, hpbw = 2.0, simTime = 0, satAlt } = params;
 
   const elevRad = Math.max(0.1, elevation) * Math.PI / 180;
   const sinElev = Math.sin(elevRad);
+
+  // --- Slant Range: 如果未提供或为 GEO 默认值, 从仰角+轨道高度估算 ---
+  // 避免静态模式下使用 35786 km (GEO) 默认值导致合成时延失真
+  let slantRange = inputSlantRange;
+  const R_EARTH = 6371;  // km
+  if (!slantRange || slantRange > 20000) {
+    const h = satAlt || 550;  // 默认 LEO 550 km
+    // d = -R*sin(el) + sqrt((R*sin(el))^2 + 2*R*h + h^2)
+    const Rs = R_EARTH * sinElev;
+    slantRange = -Rs + Math.sqrt(Rs * Rs + 2 * R_EARTH * h + h * h);
+  }
 
   // --- Tap 0: LOS 直射路径 ---
   const losDelay_ns = (slantRange * 1e3 / C_M_S) * 1e9;
@@ -847,15 +857,13 @@ export function computeCIR(params) {
     });
   }
 
-
   // --- 统计量计算 ---
-  // RMS 时延扩展 (ns)
   const totalPower = taps.reduce((s, t) => s + t.amplitude_linear * t.amplitude_linear, 0);
   const meanDelay = taps.reduce((s, t) => s + t.excessDelay_ns * t.amplitude_linear * t.amplitude_linear, 0) / totalPower;
   const meanDelaySq = taps.reduce((s, t) => s + t.excessDelay_ns * t.excessDelay_ns * t.amplitude_linear * t.amplitude_linear, 0) / totalPower;
   const rmsDelaySpread_ns = Math.sqrt(Math.max(0, meanDelaySq - meanDelay * meanDelay));
 
-  // 相干带宽 (MHz): Bc ≈ 1 / (5 * σ_τ)
+  // 相干带宽 (MHz): Bc = 1 / (5 * sigma_tau)
   const coherenceBandwidth_MHz = rmsDelaySpread_ns > 0.001 ? 1000.0 / (5.0 * rmsDelaySpread_ns) : 99999;
 
   return {
@@ -985,6 +993,28 @@ export function generateChannelTimeSeries(
       const az = satellite.radiansToDegrees(la.azimuth);
       const range = la.rangeSat;
 
+      // === Doppler: project satellite velocity onto LOS unit vector ===
+      // velocityEci is in km/s from SGP4
+      const velEci = pv.velocity;  // { x, y, z } km/s
+      const velEcf = satellite.eciToEcf(velEci, gmst);  // rotate to ECF
+      // Observer ECF position (WGS84 approx)
+      const obsEcfPos = satellite.geodeticToEcf({ longitude: satellite.degreesToRadians(observerLon), latitude: satellite.degreesToRadians(observerLat), height: observerAlt / 1000.0 });
+      // Satellite ECF position
+      const satEcfPos = satellite.eciToEcf(pv.position, gmst);
+      // LOS vector (sat -> observer, km)
+      const losX = obsEcfPos.x - satEcfPos.x;
+      const losY = obsEcfPos.y - satEcfPos.y;
+      const losZ = obsEcfPos.z - satEcfPos.z;
+      const losMag = Math.sqrt(losX*losX + losY*losY + losZ*losZ);
+      const losUx = losMag > 0 ? losX / losMag : 0;
+      const losUy = losMag > 0 ? losY / losMag : 0;
+      const losUz = losMag > 0 ? losZ / losMag : 0;
+      // Radial velocity = dot(velEcf, losUnit)  [km/s, positive = approaching]
+      const vRadial_km_s = velEcf.x * losUx + velEcf.y * losUy + velEcf.z * losUz;
+      // Doppler shift [Hz]: fd = f0 * v_radial / c
+      const freqHz = (linkParams.freq || 30) * 1e9;
+      const dopplerHz = freqHz * (vRadial_km_s * 1000) / 299792458;
+
       // 仿真时间（秒），用于 SoS 确定性衰落
       const simTimeSec = frameIndex * stepSec;
 
@@ -1023,6 +1053,7 @@ export function generateChannelTimeSeries(
       const cir = computeCIR({
         ...lbParams,
         freq: linkParams.freq || 30,
+        satAlt: geodetic.height,
       });
 
       timeline.push({
@@ -1062,7 +1093,9 @@ export function generateChannelTimeSeries(
         groupDelayNs: lb.groupDelayNs,
         dispersionNs: lb.dispersionNs,
         // CIR
-        cir
+        cir,
+        // Doppler
+        dopplerHz: safeNum ? safeNum(dopplerHz, 0) : (isNaN(dopplerHz) ? 0 : dopplerHz)
       });
 
       frameIndex++;
@@ -1241,4 +1274,46 @@ export function extractGoldenTrajectory(denseTrajectory, streetAzimuth = null) {
   
   // Sort final points by time
   return goldenPoints.sort((a, b) => new Date(a.time) - new Date(b.time));
+}
+
+// === 多普勒频移计算 (从 TLE + 位置) ===
+/**
+ * 计算给定时刻、频率下的多普勒频移
+ * @param {string} tleLine1 TLE line 1
+ * @param {string} tleLine2 TLE line 2
+ * @param {number} gsLat  地面站纬度 (deg)
+ * @param {number} gsLon  地面站经度 (deg)
+ * @param {number} gsAlt  地面站高度 (m)
+ * @param {Date}   date   时刻
+ * @param {number} freqGHz 载波频率 (GHz)
+ * @returns {number} 多普勒频移 (Hz)，正值=卫星接近（频率升高），负值=卫星远离
+ */
+export function calculateDopplerShift(tleLine1, tleLine2, gsLat, gsLon, gsAlt, date, freqGHz) {
+  try {
+    const satrec = satellite.twoline2satrec(tleLine1, tleLine2);
+    const pv = satellite.propagate(satrec, date);
+    if (!pv.position || !pv.velocity) return 0;
+
+    const gmst = satellite.gstime(date);
+    const velEcf = satellite.eciToEcf(pv.velocity, gmst);
+    const satEcf = satellite.eciToEcf(pv.position, gmst);
+    const obsEcf = satellite.geodeticToEcf({
+      longitude: satellite.degreesToRadians(gsLon),
+      latitude: satellite.degreesToRadians(gsLat),
+      height: gsAlt / 1000.0
+    });
+
+    // LOS unit vector: satellite -> observer
+    const dx = obsEcf.x - satEcf.x;
+    const dy = obsEcf.y - satEcf.y;
+    const dz = obsEcf.z - satEcf.z;
+    const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+    if (dist < 1e-9) return 0;
+
+    // Radial velocity (km/s, positive = satellite approaching observer)
+    const vr = (velEcf.x * dx + velEcf.y * dy + velEcf.z * dz) / dist;
+    return (freqGHz * 1e9) * (vr * 1000) / 299792458;
+  } catch (e) {
+    return 0;
+  }
 }

@@ -378,9 +378,9 @@ function App() {
   // Live Sync Controls
   const [isLiveSync, setIsLiveSync] = useState(false);
   const [syncMode, setSyncMode] = useState('A');
-  const [syncLat, setSyncLat] = useState(22.54);
-  const [syncLon, setSyncLon] = useState(114.05);
-  const [gsAlt, setGsAlt] = useState(0); // Ground Station altitude in meters
+  const [syncLat, setSyncLat] = useState(31.062718);
+  const [syncLon, setSyncLon] = useState(121.244818);
+  const [gsAlt, setGsAlt] = useState(15); // Ground Station altitude in meters
   const [disableFastFading, setDisableFastFading] = useState(true);
 
   const [replayData] = useState([]);
@@ -609,16 +609,25 @@ function App() {
   const [applyEffectiveAlt, setApplyEffectiveAlt] = useState(true);
   const [noradId, setNoradId] = useState('25544');
   const [tleFetching, setTleFetching] = useState(false);
-  const [tleFetchError, setTleFetchError] = useState('');
-
-  // === Milestone 20: Satellite Preset Catalog ===
+  const [tleFetchError, setTleFetchError] = useState('');  // === Milestone 20: Satellite Preset Catalog ===
   const SAT_PRESETS = [
     { label: '--- 选择卫星 ---', id: '', name: '' },
+    // === 🇨🇳 中国卫星 ===
     { label: '🇨🇳 CSS (中国空间站/天和)', id: '48274', name: 'CSS' },
+    { label: '🇨🇳 北斗-3 M1 (MEO)', id: '43001', name: '' },
+    // --- 星网 (国网/互联网低轨) ---
+    { label: '🇨🇳 星网 技术试验-A (86.5°轨道)', id: '57288', name: 'HULIANWANG JISHU SHIYAN' },
+    { label: '🇨🇳 星网 技术试验-C (50°轨道)', id: '58691', name: '' },
+    { label: '🇨🇳 星网 低轨-01 第一批 (86.5°)', id: '62323', name: 'HULIANWANG DIGUI-01' },
+    { label: '🇨🇳 星网 低轨-05 第一批', id: '62327', name: 'HULIANWANG DIGUI-05' },
+    { label: '🇨🇳 星网 低轨-11 第二批 (50°)', id: '62971', name: 'HULIANWANG DIGUI-11' },
+    { label: '🇨🇳 星网 低轨-15 第二批', id: '62975', name: 'HULIANWANG DIGUI-15' },
+    { label: '🇨🇳 星网 低轨-20 第三批 (86.5°)', id: '63687', name: 'HULIANWANG DIGUI-20' },
+    // --- 千帆 (G60/垣信) ---
     { label: '🇨🇳 千帆-1 (G60/垣信)', id: '', name: 'QIANFAN-1' },
     { label: '🇨🇳 千帆-7 (G60/垣信)', id: '', name: 'QIANFAN-7' },
     { label: '🇨🇳 千帆-19 (G60/垣信)', id: '', name: 'QIANFAN-19' },
-    { label: '🇨🇳 北斗-3 M1', id: '43001', name: '' },
+    // === 🇺🇸 国际卫星 ===
     { label: '🇺🇸 ISS (国际空间站)', id: '25544', name: 'ISS' },
     { label: '🇺🇸 Starlink-1008', id: '', name: 'STARLINK-1008' },
     { label: '🇺🇸 Starlink-1012', id: '', name: 'STARLINK-1012' },
@@ -1166,6 +1175,57 @@ function App() {
       )}
 
 
+      {/* === 统一链路参数配置区 === */}
+      <div style={{ padding: '15px', border: '1px solid rgba(255,193,7,0.5)', borderRadius: '5px', marginBottom: '20px', background: 'linear-gradient(135deg, #0a0a2e 0%, #1a1a3e 100%)', textAlign: 'left', color: '#eee' }}>
+        <h3 style={{ margin: '0 0 10px 0' }}>📡 Link Parameters <span style={{ fontSize: '0.7em', color: '#ffc107', fontWeight: 'normal' }}>— 全局链路参数（供所有仿真模块共用）</span></h3>
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <label style={{ fontSize: '0.9em', whiteSpace: 'nowrap' }}>Freq (GHz):
+            <input type="number" step="0.5" value={params.freq} onChange={e => setParams({ ...params, freq: parseFloat(e.target.value) })} style={{ width: '70px', marginLeft: '4px', fontFamily: 'monospace' }} />
+          </label>
+          <label style={{ fontSize: '0.9em', whiteSpace: 'nowrap' }} title="Satellite Effective Isotropic Radiated Power">EIRP (dBW):
+            <input type="number" step="1" value={params.eirp} onChange={e => setParams({ ...params, eirp: parseFloat(e.target.value) })} style={{ width: '60px', marginLeft: '4px', fontFamily: 'monospace' }} />
+          </label>
+          <label style={{ fontSize: '0.9em', whiteSpace: 'nowrap' }} title="User Terminal Antenna Gain">Rx Gain (dBi):
+            <input type="number" step="1" value={params.gRx} onChange={e => setParams({ ...params, gRx: parseFloat(e.target.value) })} style={{ width: '60px', marginLeft: '4px', fontFamily: 'monospace' }} />
+          </label>
+          <label style={{ fontSize: '0.9em', whiteSpace: 'nowrap' }}>Rain (mm/h):
+            <input type="number" step="1" min="0" max="100" value={params.rainRate} onChange={e => setParams({ ...params, rainRate: parseFloat(e.target.value) })} style={{ width: '60px', marginLeft: '4px', fontFamily: 'monospace' }} />
+          </label>
+          <label style={{ fontSize: '0.9em', whiteSpace: 'nowrap' }}>TEC (TECU):
+            <input type="number" step="10" value={params.tec} onChange={e => setParams({ ...params, tec: parseFloat(e.target.value) })} style={{ width: '60px', marginLeft: '4px', fontFamily: 'monospace' }} />
+          </label>
+          <label style={{ fontSize: '0.9em', whiteSpace: 'nowrap' }} title="Channel Bandwidth">BW (MHz):
+            <input type="number" step="10" value={params.bandwidth} onChange={e => setParams({ ...params, bandwidth: parseFloat(e.target.value) })} style={{ width: '65px', marginLeft: '4px', fontFamily: 'monospace' }} />
+          </label>
+          <label style={{ fontSize: '0.9em', whiteSpace: 'nowrap' }} title="LNA Noise Temperature">LNA T (K):
+            <input type="number" step="10" value={params.tRx} onChange={e => setParams({ ...params, tRx: parseFloat(e.target.value) })} style={{ width: '60px', marginLeft: '4px', fontFamily: 'monospace' }} />
+          </label>
+          <label style={{ fontSize: '0.9em', whiteSpace: 'nowrap' }}>XPD (dB):
+            <input type="number" step="1" value={params.xpdAnt} onChange={e => setParams({ ...params, xpdAnt: parseFloat(e.target.value) })} style={{ width: '55px', marginLeft: '4px', fontFamily: 'monospace' }} />
+          </label>
+          <label style={{ fontSize: '0.9em', whiteSpace: 'nowrap' }} title="Half-Power Beam Width">HPBW (°):
+            <input type="number" step="0.1" value={params.hpbw} onChange={e => setParams({ ...params, hpbw: parseFloat(e.target.value) })} style={{ width: '55px', marginLeft: '4px', fontFamily: 'monospace' }} />
+          </label>
+          <label style={{ fontSize: '0.9em' }}>Env:
+            <select value={params.env} onChange={e => setParams({ ...params, env: e.target.value })} style={{ marginLeft: '4px', padding: '2px 4px', borderRadius: '3px' }}>
+              <option value="open">Open (Rural)</option>
+              <option value="suburban">Suburban</option>
+              <option value="urban">Urban</option>
+              <option value="maritime">Maritime</option>
+            </select>
+          </label>
+          <label style={{ fontSize: '0.9em', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }} title="Flat Panel Phased Array Broadside Scan Roll-off">
+            <input type="checkbox" checked={params.isPhasedArray || false} onChange={e => setParams({ ...params, isPhasedArray: e.target.checked })} style={{ width: 'auto' }} />
+            Phased Array
+          </label>
+        </div>
+        {isDynamicOrbit && (
+          <div style={{ marginTop: '6px', fontSize: '0.8em', color: '#888' }}>
+            ℹ️ 仰角(Elevation)与斜距(Slant Range)由轨道实时跟踪自动更新
+          </div>
+        )}
+      </div>
+
       {/* === 信道传播仿真面板 === */}
       <ChannelSimPanel
         tleLine1={tleLine1}
@@ -1174,6 +1234,7 @@ function App() {
         globalParams={params}
         groundStation={{ lat: syncLat, lon: syncLon, alt: gsAlt }}
         onGroundStationChange={handleChannelGroundStationChange}
+        onLinkParamsChange={nextParams => setParams(prev => ({ ...prev, ...nextParams }))}
         activeProjectManifest={activeProjectManifest}
         requestedCirIndex={requestedCirIndex}
         onCirSyncStateChange={handleCirSyncStateChange}
@@ -1279,62 +1340,12 @@ function App() {
       )}
       <div className="controls">
         <label>
-          Frequency (GHz):
-          <input type="number" step="0.5" value={params.freq} onChange={e => setParams({ ...params, freq: parseFloat(e.target.value) })} />
-        </label>
-        <label>
-          Rain Rate (mm/h):
-          <input type="range" min="0" max="100" value={params.rainRate} onChange={e => setParams({ ...params, rainRate: parseFloat(e.target.value) })} />
-          <span>{params.rainRate} mm/h</span>
-        </label>
-        <label>
           Elevation (Deg):
           {isDynamicOrbit ? (
             <span style={{ marginLeft: '10px', fontWeight: 'bold', color: '#0056b3' }}>{orbitData ? orbitData.elevation.toFixed(1) : '---'}° (Auto)</span>
           ) : (
             <input type="number" step="1" value={params.elevation} onChange={e => setParams({ ...params, elevation: parseFloat(e.target.value) })} />
           )}
-        </label>
-        <label title="Satellite Effective Isotropic Radiated Power">
-          EIRP (dBW):
-          <input type="number" step="1" value={params.eirp !== undefined ? params.eirp : 60.0} onChange={e => setParams({ ...params, eirp: parseFloat(e.target.value) })} />
-        </label>
-        <label title="User Terminal Antenna Gain">
-          Rx Gain (dBi):
-          <input type="number" step="1" value={params.gRx !== undefined ? params.gRx : 42.0} onChange={e => setParams({ ...params, gRx: parseFloat(e.target.value) })} />
-        </label>
-        <label title="User Terminal LNA Noise Temperature">
-          LNA T (K):
-          <input type="number" step="10" value={params.tRx !== undefined ? params.tRx : 150.0} onChange={e => setParams({ ...params, tRx: parseFloat(e.target.value) })} />
-        </label>
-        <label title="Channel Bandwidth in MHz">
-          Bandwidth (MHz):
-          <input type="number" step="10" value={params.bandwidth !== undefined ? params.bandwidth : 400.0} onChange={e => setParams({ ...params, bandwidth: parseFloat(e.target.value) })} />
-        </label>
-        <label>
-          TEC (TECU):
-          <input type="number" step="10" value={params.tec} onChange={e => setParams({ ...params, tec: parseFloat(e.target.value) })} />
-        </label>
-        <label>
-          Antenna XPD (dB):
-          <input type="number" step="1" value={params.xpdAnt} onChange={e => setParams({ ...params, xpdAnt: parseFloat(e.target.value) })} />
-        </label>
-        <label title="Terminal Half-Power Beam Width">
-          Antenna HPBW (°):
-          <input type="number" step="0.1" value={params.hpbw !== undefined ? params.hpbw : 2.0} onChange={e => setParams({ ...params, hpbw: parseFloat(e.target.value) })} />
-        </label>
-        <label title="Enable Flat Panel Phased Array Broadside Scan Roll-off">
-          <input type="checkbox" checked={params.isPhasedArray || false} onChange={e => setParams({ ...params, isPhasedArray: e.target.checked })} style={{ width: 'auto', marginRight: '5px' }} />
-          Phased Array Terminal
-        </label>
-        <label>
-          Environment:
-          <select value={params.env} onChange={e => setParams({ ...params, env: e.target.value })}>
-            <option value="open">Open (Rural)</option>
-            <option value="suburban">Suburban (Trees)</option>
-            <option value="urban">Urban (Buildings)</option>
-            <option value="maritime">Maritime (Flat Sea)</option>
-          </select>
         </label>
       </div>
 

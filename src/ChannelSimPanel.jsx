@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Line, Bar } from 'react-chartjs-2';
 import JSZip from 'jszip';
 import { read as readMat } from 'mat-for-js';
-import { generateChannelTimeSeries, generateChannelTimeSeriesForTimestamps, generateTrajectoryExport, predictPasses, calibrateModel, applyCalibration, createDefaultCalibration, getCalibParamDefs } from './model.js';
+import { generateChannelTimeSeries, generateChannelTimeSeriesForTimestamps, generateTrajectoryExport, predictPasses, calibrateModel, applyCalibration, createDefaultCalibration, getCalibParamDefs, calculateDopplerShift } from './model.js';
 import { getSatelliteList, getSatelliteBandParams } from './knownSatellites.js';
 import { SimulationValidator } from './ValidationModule.js';
 import { parseTrajectoryCsv } from './projectSync.js';
@@ -20,29 +20,39 @@ export default function ChannelSimPanel({
     globalParams,
     groundStation,
     onGroundStationChange,
+    onLinkParamsChange,
     activeProjectManifest,
     requestedCirIndex,
     onCirSyncStateChange
 }) {
     // === Ground Station Config ===
-    const [gsLat, setGsLat] = useState(groundStation?.lat ?? 22.54);
-    const [gsLon, setGsLon] = useState(groundStation?.lon ?? 114.05);
-    const [gsAlt, setGsAlt] = useState(groundStation?.alt ?? 0);
+    const [gsLat, setGsLat] = useState(groundStation?.lat ?? 31.062718);
+    const [gsLon, setGsLon] = useState(groundStation?.lon ?? 121.244818);
+    const [gsAlt, setGsAlt] = useState(groundStation?.alt ?? 15);
 
     // === Time Config ===
     const [durationMin, setDurationMin] = useState(30);
     const [stepSec, setStepSec] = useState(10);
 
-    // === Link Params ===
-    const [freq, setFreq] = useState(globalParams?.freq || 12.0);
-    const [eirp, setEirp] = useState(globalParams?.eirp || 60.0);
-    const [gRx, setGRx] = useState(globalParams?.gRx || 42.0);
-    const [tRx, setTRx] = useState(globalParams?.tRx || 150.0);
-    const [bandwidth, setBandwidth] = useState(globalParams?.bandwidth || 400.0);
-    const [tec, setTec] = useState(globalParams?.tec || 50.0);
+    // === Link Params: 从 globalParams 读取，移除本地独立输入框 ===
+    const freq = globalParams?.freq ?? 12.0;
+    const eirp = globalParams?.eirp ?? 60.0;
+    const gRx = globalParams?.gRx ?? 42.0;
+    const tRx = globalParams?.tRx ?? 150.0;
+    const bandwidth = globalParams?.bandwidth ?? 400.0;
+    const tec = globalParams?.tec ?? 50.0;
+    const rainRate = globalParams?.rainRate ?? 5.0;
+    // env 和 disableFastFading 保留本地控制（仿真模式专属）
     const [env, setEnv] = useState(globalParams?.env || 'suburban');
-    const [rainRate, setRainRate] = useState(globalParams?.rainRate || 5.0);
     const [disableFastFading, setDisableFastFading] = useState(true);
+    // 当 globalParams.env 外部改变时同步
+    const prevGlobalEnvRef = React.useRef(globalParams?.env);
+    useEffect(() => {
+        if (globalParams?.env && globalParams.env !== prevGlobalEnvRef.current) {
+            prevGlobalEnvRef.current = globalParams.env;
+            setEnv(globalParams.env);
+        }
+    }, [globalParams?.env]);
 
     // === Calibration State ===
     const [calibProfile, setCalibProfile] = useState(createDefaultCalibration());
@@ -314,17 +324,27 @@ export default function ChannelSimPanel({
 
     function applyTrajectoryToFrame(frame, sample, index) {
         if (!sample) return frame;
+        const frameTime = sample.time ? new Date(sample.time) : frame.time;
+        // Compute Doppler from TLE + frame timestamp
+        let dopplerHz = 0;
+        if (frameTime && tleLine1 && tleLine2 && gsLat != null && gsLon != null) {
+            try {
+                const fq = frame.freqGHz ?? (globalParams?.freq ?? 12.0);
+                dopplerHz = calculateDopplerShift(tleLine1, tleLine2, gsLat, gsLon, gsAlt, frameTime, fq);
+            } catch (_) { dopplerHz = 0; }
+        }
         return {
             ...frame,
             frameIndex: index,
-            time: sample.time ? new Date(sample.time) : frame.time,
+            time: frameTime,
             timeLabel: sample.timeLabel || frame.timeLabel,
             elevation: safeNum(sample.elevation, frame.elevation),
             azimuth: safeNum(sample.azimuth, frame.azimuth),
             slantRange: safeNum(sample.slantRange, frame.slantRange),
             satLat: safeNum(sample.lat, frame.satLat),
             satLon: safeNum(sample.lon, frame.satLon),
-            satAlt: safeNum(sample.alt, frame.satAlt)
+            satAlt: safeNum(sample.alt, frame.satAlt),
+            dopplerHz
         };
     }
 
@@ -346,17 +366,35 @@ export default function ChannelSimPanel({
     }
 
     function buildCirFromRays(rays) {
-        // rays: array of rows (N x 19) float
-        // Heuristic mapping (based on sample):
-        // - delay_s ~ col[2]
-        // - amplitude_dB ~ col[8] (often negative, seems like path gain / relative power)
+        // rays: array of rows (N x 19)
+        // Confirmed column mapping (from MAT data analysis):
+        //   col[2]  : absolute propagation delay (seconds)
+        //   col[4]  : E-field Real part
+        //   col[5]  : E-field Imaginary part
+        //   col[8]  : arrival phase (degrees, -180~+180) -- NOT power!
+        // BUG FIX: previously used col[8] (phase) as amplitude_dB, causing all
+        //          taps to appear at similar power levels in the PDP plot.
+        //          Now correctly derived from |E| = sqrt(col4^2 + col5^2).
+
+        const MIN_E_MAG = 1e-30; // floor to avoid log(0)
+
         const taps = (rays || []).map((row, i) => {
             const delay_s = safeNum(row?.[2], 0);
             const delay_ns = delay_s * 1e9;
-            const amp_dB = safeNum(row?.[8], 0);
+
+            // Correct: compute path amplitude from E-field complex magnitude
+            const eRe = safeNum(row?.[4], 0);
+            const eIm = safeNum(row?.[5], 0);
+            const eMag = Math.sqrt(eRe * eRe + eIm * eIm);
+            const amp_dB = 20 * Math.log10(Math.max(eMag, MIN_E_MAG));
+
+            // Store phase for reference
+            const phase_deg = safeNum(row?.[8], 0);
+
             return {
                 excessDelay_ns: delay_ns,
                 amplitude_dB: amp_dB,
+                phase_rad: phase_deg * Math.PI / 180,
                 label: 'Tap' + (i + 1)
             };
         }).sort((a, b) => a.excessDelay_ns - b.excessDelay_ns);
@@ -369,16 +407,25 @@ export default function ChannelSimPanel({
             taps.forEach(t => t.excessDelay_ns -= minDelay);
         }
 
-        // Use all taps
-        const pLin = taps.map(t => Math.pow(10, t.amplitude_dB / 10));
+        // Normalize so strongest tap = 0 dB (relative PDP)
+        const maxAmp = taps.length > 0 ? Math.max(...taps.map(t => t.amplitude_dB)) : 0;
+        taps.forEach(t => { t.amplitude_dB -= maxAmp; });
+
+        // Drop taps more than 80 dB below the strongest (insignificant)
+        const DYNAMIC_RANGE_DB = 80;
+        const filteredTaps = taps.filter(t => t.amplitude_dB >= -DYNAMIC_RANGE_DB);
+        const finalTaps = filteredTaps.length > 0 ? filteredTaps : taps.slice(0, 1);
+
+        // Compute RMS delay spread using power-weighted mean
+        const pLin = finalTaps.map(t => Math.pow(10, t.amplitude_dB / 10));
         const sumP = pLin.reduce((a, b) => a + b, 0) || 1;
-        const meanTau = taps.reduce((acc, t, idx) => acc + t.excessDelay_ns * pLin[idx], 0) / sumP;
-        const meanTau2 = taps.reduce((acc, t, idx) => acc + (t.excessDelay_ns ** 2) * pLin[idx], 0) / sumP;
+        const meanTau = finalTaps.reduce((acc, t, idx) => acc + t.excessDelay_ns * pLin[idx], 0) / sumP;
+        const meanTau2 = finalTaps.reduce((acc, t, idx) => acc + (t.excessDelay_ns ** 2) * pLin[idx], 0) / sumP;
         const rms = Math.sqrt(Math.max(0, meanTau2 - meanTau ** 2));
         const coherenceMHz = rms > 0 ? (1 / (5 * rms * 1e-9)) / 1e6 : 0; // ~1/(5*sigma_tau)
 
         return {
-            taps: taps.length ? taps : [{ excessDelay_ns: 0, amplitude_dB: 0, label: 'LOS' }],
+            taps: finalTaps.length ? finalTaps : [{ excessDelay_ns: 0, amplitude_dB: 0, label: 'LOS' }],
             rmsDelaySpread_ns: safeNum(rms, 0),
             coherenceBandwidth_MHz: safeNum(coherenceMHz, 0),
             absoluteDelay_ns: safeNum(absoluteDelay_ns, 0)
@@ -467,16 +514,24 @@ export default function ChannelSimPanel({
                 
                 // Get path loss (ReceivedPower_COH or NONCOH)
                 const rxPower = safeNum(mat?.ReceivedPower_NONCOH?.[0], -150);
+
+                // 提取频率信息（常见字段：CenterFrequency、Frequency，单位 Hz）
+                const rawFreqHz = mat?.CenterFrequency?.[0] ?? mat?.Frequency?.[0] ?? mat?.freq?.[0] ?? null;
+                const frameFreqGHz = rawFreqHz != null ? safeNum(rawFreqHz, 0) / 1e9 : null;
                 
                 frames.push({
                     frameIndex: i,
                     importedFrameId: idx,
                     timeLabel: `Imported frame ${idx}`,
+                    freqGHz: frameFreqGHz,
                     elevation: 10,
                     azimuth: 0,
                     slantRange: 0,
                     absoluteFspl: -rxPower, // In imported mat, absoluteFspl will hold path loss
                     rxPowerDbm: rxPower,
+                    rtPathLoss: rxPower,       // RT engine total received power (dB, positive = loss)
+                    isImportedFrame: true,
+                    dopplerHz: 0,              // filled after handshake merge below
                     snrDb: 0,
                     noiseFloorDbm: -100,
                     attRain: 0,
@@ -557,7 +612,9 @@ export default function ChannelSimPanel({
                 hasManifest: Boolean(importedManifest),
                 standalone: handshakeSamples.length !== frames.length,
                 handshakeSource,
-                taskId: importedManifest?.Task_ID || handshakeManifest?.Task_ID || null
+                taskId: importedManifest?.Task_ID || handshakeManifest?.Task_ID || null,
+                // 频率：取所有帧中第一个有效值
+                freqGHz: frames.find(f => f.freqGHz != null)?.freqGHz ?? null
             });
 
             if (handshakeSamples.length === frames.length) {
@@ -780,8 +837,16 @@ export default function ChannelSimPanel({
         ctx.fillStyle = '#88ccff';
         ctx.font = '10px monospace';
         ctx.textAlign = 'right';
-        ctx.fillText('PathLoss: ' + frame.rxPowerDbm.toFixed(2) + ' dB | El: ' + frame.elevation.toFixed(1) + '\u00b0', W - padR, 15);
+        const powerLabel = frame.isImportedFrame
+            ? 'RT PathLoss: ' + Math.abs(frame.rtPathLoss ?? frame.rxPowerDbm).toFixed(1) + ' dB'
+            : 'Rx: ' + (frame.rxPowerDbm ?? 0).toFixed(1) + ' dBm | SNR: ' + (frame.snrDb ?? 0).toFixed(1) + ' dB';
+        ctx.fillText(powerLabel + ' | El: ' + frame.elevation.toFixed(1) + '\u00b0', W - padR, 15);
         ctx.fillText('DS(\u03c3_\u03c4): ' + rmsDelaySpread_ns.toFixed(2) + ' ns | Bc: ' + coherenceBandwidth_MHz.toFixed(1) + ' MHz', W - padR, 29);
+        const dopHz = frame.dopplerHz ?? 0;
+        const dopKHz = dopHz / 1000;
+        const dopSign = dopHz >= 0 ? '+' : '';
+        ctx.fillStyle = dopHz >= 0 ? '#7ecfff' : '#ffb347';
+        ctx.fillText('Doppler: ' + dopSign + dopKHz.toFixed(2) + ' kHz (' + (dopHz >= 0 ? 'approaching ↑▲' : 'receding ↓▼') + ')', W - padR, 43);
 
     }, [timeline, cirIdx]);
 
@@ -791,7 +856,7 @@ export default function ChannelSimPanel({
         // 找出所有帧中最大 tap 数量
         const maxTaps = Math.max(...timeline.map(f => f.cir.taps.length));
         // 基础列头
-        let headers = 'Time,Elevation_deg,Azimuth_deg,SlantRange_km,AbsFSPL_dB,RxPower_dBm,NoiseFloor_dBm,SNR_dB,AttRain_dB,AttGas_dB,AttCloud_dB,AtmTotal_dB,FadeLMS_dB,Faraday_dB,Pointing_dB,Scint_dB,TSky_K,XPD_dB,CapRank1_bpsHz,CapRank2_bpsHz,GroupDelay_ns,Dispersion_ns,CIR_NumTaps,CIR_RMSDelaySpread_ns,CIR_CoherenceBW_MHz';
+        let headers = 'Time,Elevation_deg,Azimuth_deg,SlantRange_km,AbsFSPL_dB,RxPower_dBm,NoiseFloor_dBm,SNR_dB,Doppler_Hz,AttRain_dB,AttGas_dB,AttCloud_dB,AtmTotal_dB,FadeLMS_dB,Faraday_dB,Pointing_dB,Scint_dB,TSky_K,XPD_dB,CapRank1_bpsHz,CapRank2_bpsHz,GroupDelay_ns,Dispersion_ns,CIR_NumTaps,CIR_RMSDelaySpread_ns,CIR_CoherenceBW_MHz';
         // 为每个 tap 添加详细列头
         for (let i = 0; i < maxTaps; i++) {
             headers += `,Tap${i}_Label,Tap${i}_ExcessDelay_ns,Tap${i}_Amplitude_dB,Tap${i}_Phase_rad`;
@@ -806,6 +871,7 @@ export default function ChannelSimPanel({
                 safeNum(f.rxPowerDbm).toFixed(2),
                 safeNum(f.noiseFloorDbm).toFixed(2),
                 safeNum(f.snrDb).toFixed(2),
+                safeNum(f.dopplerHz ?? 0).toFixed(1),
                 safeNum(f.attRain).toFixed(3),
                 safeNum(f.attGas).toFixed(3),
                 safeNum(f.attCloud).toFixed(3),
@@ -1059,24 +1125,7 @@ export default function ChannelSimPanel({
 
                 <div>
                     <div style={inputGroupStyle}>
-                        <strong style={{ fontSize: '0.9em' }}>{'\u2699\ufe0f'} Link</strong>
-                        <label style={labelStyle}>Freq(GHz):
-                            <input type="number" step="0.5" value={freq} onChange={e => setFreq(parseFloat(e.target.value))} style={inputStyle} />
-                        </label>
-                        <label style={labelStyle}>EIRP(dBW):
-                            <input type="number" step="1" value={eirp} onChange={e => setEirp(parseFloat(e.target.value))} style={{ ...inputStyle, width: '55px' }} />
-                        </label>
-                        <label style={labelStyle}>Rx(dBi):
-                            <input type="number" step="1" value={gRx} onChange={e => setGRx(parseFloat(e.target.value))} style={{ ...inputStyle, width: '55px' }} />
-                        </label>
-                    </div>
-                    <div style={inputGroupStyle}>
-                        <label style={labelStyle}>Rain(mm/h):
-                            <input type="number" step="1" min="0" max="100" value={rainRate} onChange={e => setRainRate(parseFloat(e.target.value))} style={{ ...inputStyle, width: '55px' }} />
-                        </label>
-                        <label style={labelStyle}>TEC:
-                            <input type="number" step="10" value={tec} onChange={e => setTec(parseFloat(e.target.value))} style={{ ...inputStyle, width: '55px' }} />
-                        </label>
+                        <strong style={{ fontSize: '0.9em' }}>{'\u2699\ufe0f'} Channel Engine</strong>
                         <label style={labelStyle}>Env:
                             <select value={env} onChange={e => setEnv(e.target.value)} style={selectStyle}>
                                 <option value="suburban">suburban</option>
@@ -1087,8 +1136,11 @@ export default function ChannelSimPanel({
                         </label>
                         <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
                             <input type="checkbox" checked={disableFastFading} onChange={e => setDisableFastFading(e.target.checked)} />
-                            <span>Smooth</span>
+                            <span>Smooth (no fast fading)</span>
                         </label>
+                        <span style={{ fontSize: '0.75em', color: '#888' }}>
+                            ℹ️ Freq={freq}GHz, EIRP={eirp}dBW, Rx={gRx}dBi, Rain={rainRate}mm/h, TEC={tec} — 在“📡 Link Parameters”卡片修改
+                        </span>
                     </div>
                 </div>
             </div>
@@ -1173,8 +1225,7 @@ export default function ChannelSimPanel({
                                                                         setCalibBandKey(meta.band);
                                                                         const bp = getSatelliteBandParams(meta.satellite, meta.band);
                                                                         if (bp) {
-                                                                            setFreq(bp.freq);
-                                                                            setEirp(bp.eirp);
+                                                                            onLinkParamsChange?.({ freq: bp.freq, eirp: bp.eirp });
                                                                             statusParts.push(`🛰️ ${found.name} / ${meta.band}频段`);
                                                                         }
                                                                     } else {
@@ -1187,9 +1238,11 @@ export default function ChannelSimPanel({
                                                                 // 自定义卫星：{ name, freq, eirp, polarization, bandwidth, ... }
                                                                 const sat = meta.satellite;
                                                                 setCalibSatId('');
-                                                                if (sat.freq != null) setFreq(sat.freq);
-                                                                if (sat.eirp != null) setEirp(sat.eirp);
-                                                                if (sat.bandwidth != null) setBandwidth(sat.bandwidth);
+                                                                const nextParams = {};
+                                                                if (sat.freq != null) nextParams.freq = sat.freq;
+                                                                if (sat.eirp != null) nextParams.eirp = sat.eirp;
+                                                                if (sat.bandwidth != null) nextParams.bandwidth = sat.bandwidth;
+                                                                if (Object.keys(nextParams).length > 0) onLinkParamsChange?.(nextParams);
                                                                 // 必填字段校验
                                                                 const missing = [];
                                                                 if (sat.freq == null) missing.push('freq(频率)');
@@ -1575,6 +1628,14 @@ export default function ChannelSimPanel({
                                     Task_ID: {importInfo.taskId.slice(0, 8)}...
                                 </span>
                             )}
+                            <span style={{
+                                fontSize: '0.8em', fontFamily: 'monospace', padding: '2px 8px', borderRadius: '999px',
+                                background: importInfo.freqGHz != null ? 'rgba(78,205,196,0.15)' : 'rgba(150,150,150,0.1)',
+                                border: importInfo.freqGHz != null ? '1px solid rgba(78,205,196,0.4)' : '1px solid rgba(150,150,150,0.3)',
+                                color: importInfo.freqGHz != null ? '#4ecdc4' : '#888'
+                            }}>
+                                📡 {importInfo.freqGHz != null ? `${importInfo.freqGHz.toFixed(2)} GHz` : 'Freq: 未知'}
+                            </span>
                             {!isStandaloneMode && (
                                 <span style={{ fontSize: '0.85em', color: '#ccc', marginLeft: 'auto' }}>
                                     Click a highlighted point in the trajectory view to jump this CIR frame.
