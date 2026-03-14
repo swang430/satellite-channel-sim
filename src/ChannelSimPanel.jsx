@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Line, Bar } from 'react-chartjs-2';
 import JSZip from 'jszip';
 import { read as readMat } from 'mat-for-js';
-import { generateChannelTimeSeries, generateChannelTimeSeriesForTimestamps, generateTrajectoryExport, predictPasses, calibrateModel, applyCalibration, createDefaultCalibration, getCalibParamDefs, calculateDopplerShift } from './model.js';
+import { generateChannelTimeSeries, generateChannelTimeSeriesForTimestamps, generateChannelTimeSeriesFromGeometry, generateTrajectoryExport, predictPasses, calibrateModel, applyCalibration, createDefaultCalibration, getCalibParamDefs, calculateDopplerShift } from './model.js';
 import { getSatelliteList, getSatelliteBandParams } from './knownSatellites.js';
 import { SimulationValidator } from './ValidationModule.js';
 import { parseTrajectoryCsv } from './projectSync.js';
@@ -176,7 +176,14 @@ export default function ChannelSimPanel({
                 : null;
             // If no handshake but imported CIR exists with timestamps, use those for A/B comparison
             const importedTimestamps = (!effectiveSamples && importedTimeline && importedTimeline.length > 0)
-                ? importedTimeline.filter(f => f.time).map(f => ({ time: f.time, elevation: f.elevation, azimuth: f.azimuth, slantRange: f.slantRange }))
+                ? importedTimeline.filter(f => f.time || f.elevation > 0).map(f => ({
+                    time: f.time,
+                    elevation: f.elevation,
+                    azimuth: f.azimuth,
+                    slantRange: f.slantRange,
+                    satLat: f.satLat, satLon: f.satLon, satAlt: f.satAlt,
+                    dopplerHz: f.dopplerHz
+                  }))
                 : null;
 
             if (effectiveSamples && effectiveSamples.length > 0) {
@@ -188,15 +195,10 @@ export default function ChannelSimPanel({
                     linkParams
                 );
             } else if (importedTimestamps && importedTimestamps.length > 0) {
-                // Use imported CIR frame timestamps for native generation — ensures same trajectory for A/B comparison
-                const timestamps = importedTimestamps.map(s => new Date(s.time));
-                result = generateChannelTimeSeriesForTimestamps(
-                    tleLine1, tleLine2,
-                    gsLat, gsLon, gsAlt,
-                    timestamps,
-                    linkParams
-                );
-                setStatusMsg('\u2705 Generated native CIR using imported CIR trajectory timestamps (' + timestamps.length + ' points) for A/B comparison.');
+                // A/B comparison: use exact geometry (el/az/range) from imported CIR frames
+                // Do NOT re-propagate via SGP4 — the imported data may use a different satellite/TLE
+                result = generateChannelTimeSeriesFromGeometry(importedTimestamps, linkParams);
+                setStatusMsg('\u2705 Generated native CIR using imported trajectory geometry (' + importedTimestamps.length + ' points) for A/B comparison.');
             } else {
                 result = generateChannelTimeSeries(
                     tleLine1, tleLine2,

@@ -1285,6 +1285,76 @@ export function extractGoldenTrajectory(denseTrajectory, streetAzimuth = null) {
   return goldenPoints.sort((a, b) => new Date(a.time) - new Date(b.time));
 }
 
+// === Generate native CIR from pre-computed geometry (for A/B comparison with RT data) ===
+// Instead of SGP4 propagation, uses the exact el/az/range from trajectory samples
+export function generateChannelTimeSeriesFromGeometry(
+  trajectorySamples,   // array of { time, elevation, azimuth, slantRange, lat?, lon?, alt? }
+  linkParams = {}
+) {
+  const k_boltzmann = 1.380649e-23;
+  const timeline = [];
+
+  trajectorySamples.forEach((sample, frameIndex) => {
+    const date = sample.time ? new Date(sample.time) : new Date();
+    const elev = sample.elevation || 0;
+    const az = sample.azimuth || 0;
+    const range = sample.slantRange || 1000;
+    const satAlt = sample.alt || sample.satAlt || 550;
+
+    const simTimeSec = frameIndex * 10;
+
+    const lbParams = {
+      ...linkParams,
+      elevation: Math.max(0.1, elev),
+      slantRange: range,
+      simTime: linkParams.disableFastFading ? 0 : simTimeSec
+    };
+    const lb = calculateLinkBudget(lbParams);
+
+    const absoluteFspl = 20 * Math.log10(range) + 20 * Math.log10(linkParams.freq || 30) + 92.45;
+    const eirp = linkParams.eirp || 60.0;
+    const gRx = linkParams.gRx || 42.0;
+    const tRx = linkParams.tRx || 150.0;
+    const bwMHz = linkParams.bandwidth || 400.0;
+
+    const absoluteLoss = lb.totalAtmosphericLoss + lb.fadeLMS + lb.lossFaraday
+      + lb.pointingLoss + (lb.scanLoss || 0) + (lb.multipathLoss || 0)
+      + (lb.scintLoss || 0) + absoluteFspl;
+    const rxPowerDbm = eirp + 30 - absoluteLoss + gRx;
+
+    const tSys = tRx + lb.tSky + 3.0;
+    const noisePowerW = k_boltzmann * tSys * (bwMHz * 1e6);
+    const noiseFloorDbm = 10 * Math.log10(noisePowerW) + 30;
+    const snrDb = Math.max(-30, rxPowerDbm - noiseFloorDbm);
+
+    const { capRank2, capRank1 } = calculateMIMOCapacity(snrDb, lb.xpd);
+    const cir = computeCIR({ ...lbParams, freq: linkParams.freq || 30, satAlt });
+
+    // Doppler cannot be computed without velocity — set to 0 or from imported frame
+    const dopplerHz = sample.dopplerHz || 0;
+
+    timeline.push({
+      time: date,
+      timeLabel: date.toLocaleTimeString(),
+      frameIndex,
+      elevation: elev, azimuth: az, slantRange: range,
+      satLat: sample.lat || sample.satLat || 0,
+      satLon: sample.lon || sample.satLon || 0,
+      satAlt: satAlt,
+      apparentElevation: lb.apparentElevation,
+      absoluteFspl, rxPowerDbm, noiseFloorDbm, snrDb,
+      attRain: lb.attRain, attGas: lb.attGas, attCloud: lb.attCloud, totalAtmosphericLoss: lb.totalAtmosphericLoss,
+      fadeLMS: lb.fadeLMS, lossFaraday: lb.lossFaraday, pointingLoss: lb.pointingLoss,
+      scanLoss: lb.scanLoss || 0, multipathLoss: lb.multipathLoss || 0, scintLoss: lb.scintLoss || 0, tSky: lb.tSky,
+      xpd: lb.xpd, capRank1, capRank2, groupDelayNs: lb.groupDelayNs, dispersionNs: lb.dispersionNs,
+      cir,
+      dopplerHz
+    });
+  });
+
+  return timeline;
+}
+
 // === 多普勒频移计算 (从 TLE + 位置) ===
 /**
  * 计算给定时刻、频率下的多普勒频移
