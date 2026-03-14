@@ -170,14 +170,33 @@ export default function ChannelSimPanel({
                 linkParams = applyCalibration(linkParams, calibProfile);
             }
             let result;
-            if (linkedTrajectorySamples && linkedTrajectorySamples.length > 0) {
-                const timestamps = linkedTrajectorySamples.map(s => new Date(s.time));
+            // Priority: 1) linked trajectory samples (handshake), 2) imported timeline timestamps, 3) auto-find pass
+            const effectiveSamples = (linkedTrajectorySamples && linkedTrajectorySamples.length > 0)
+                ? linkedTrajectorySamples
+                : null;
+            // If no handshake but imported CIR exists with timestamps, use those for A/B comparison
+            const importedTimestamps = (!effectiveSamples && importedTimeline && importedTimeline.length > 0)
+                ? importedTimeline.filter(f => f.time).map(f => ({ time: f.time, elevation: f.elevation, azimuth: f.azimuth, slantRange: f.slantRange }))
+                : null;
+
+            if (effectiveSamples && effectiveSamples.length > 0) {
+                const timestamps = effectiveSamples.map(s => new Date(s.time));
                 result = generateChannelTimeSeriesForTimestamps(
                     tleLine1, tleLine2,
                     gsLat, gsLon, gsAlt,
                     timestamps,
                     linkParams
                 );
+            } else if (importedTimestamps && importedTimestamps.length > 0) {
+                // Use imported CIR frame timestamps for native generation — ensures same trajectory for A/B comparison
+                const timestamps = importedTimestamps.map(s => new Date(s.time));
+                result = generateChannelTimeSeriesForTimestamps(
+                    tleLine1, tleLine2,
+                    gsLat, gsLon, gsAlt,
+                    timestamps,
+                    linkParams
+                );
+                setStatusMsg('\u2705 Generated native CIR using imported CIR trajectory timestamps (' + timestamps.length + ' points) for A/B comparison.');
             } else {
                 result = generateChannelTimeSeries(
                     tleLine1, tleLine2,
