@@ -592,6 +592,29 @@ export default function ChannelSimPanel({
                 });
             }
 
+            // === Direct geometry injection from trajectory.csv (independent of handshake) ===
+            // This ensures imported frames always have correct el/az/range even in standalone mode
+            if (zipTrajectorySamples.length > 0 && zipTrajectorySamples.length === frames.length) {
+                frames.forEach((f, idx) => {
+                    const ts = zipTrajectorySamples[idx];
+                    if (ts) {
+                        f.elevation = ts.elevation ?? f.elevation;
+                        f.azimuth = ts.azimuth ?? f.azimuth;
+                        f.slantRange = ts.slantRange ?? f.slantRange;
+                        f.satLat = ts.lat ?? ts.satLat ?? f.satLat;
+                        f.satLon = ts.lon ?? ts.satLon ?? f.satLon;
+                        f.satAlt = ts.alt ?? ts.satAlt ?? f.satAlt;
+                        if (ts.time) {
+                            f.time = new Date(ts.time);
+                            f.timeLabel = new Date(ts.time).toLocaleTimeString();
+                        }
+                    }
+                });
+                console.log('[CIR Import] Injected trajectory.csv geometry into', frames.length, 'frames');
+            } else if (zipTrajectorySamples.length > 0) {
+                console.warn('[CIR Import] trajectory.csv has', zipTrajectorySamples.length, 'rows but', frames.length, 'frames — skipping geometry injection');
+            }
+
             let handshakeSource = '';
             let handshakeSamples = [];
             let handshakeManifest = null;
