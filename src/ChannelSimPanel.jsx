@@ -147,6 +147,20 @@ export default function ChannelSimPanel({
                 startTime = new Date(targetPass.aos.getTime() - 2 * 60000);
                 endTime = new Date(targetPass.los.getTime() + 2 * 60000);
                 currentDuration = Math.ceil(targetPass.durationSec / 60) + 4;
+            } else if (!linkedTrajectorySamples || linkedTrajectorySamples.length === 0) {
+                // No pass selected and no linked trajectory — auto-find next visible pass
+                const autoPass = predictPasses(tleLine1, tleLine2, gsLat, gsLon, gsAlt, 24, 5);
+                if (autoPass && autoPass.length > 0) {
+                    const best = autoPass[0];
+                    startTime = new Date(best.aos.getTime() - 2 * 60000);
+                    endTime = new Date(best.los.getTime() + 2 * 60000);
+                    currentDuration = Math.ceil(best.durationSec / 60) + 4;
+                    setStatusMsg('\u2139\ufe0f No pass selected — auto-using next pass (max El ' + best.maxElev.toFixed(1) + '\u00b0, ' + best.aos.toLocaleTimeString() + ')');
+                } else {
+                    startTime = new Date();
+                    endTime = new Date(startTime.getTime() + currentDuration * 60 * 1000);
+                    setStatusMsg('\u26a0\ufe0f No visible pass in 24h. Generating from current time (satellite may be below horizon).');
+                }
             } else {
                 startTime = new Date();
                 endTime = new Date(startTime.getTime() + currentDuration * 60 * 1000);
