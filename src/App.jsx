@@ -1018,13 +1018,32 @@ function App() {
               </label>
             </div>
             
-            {/* Milestone 20: Satellite Preset Dropdown */}
+            {/* Satellite Selection + Pass Prediction (merged) */}
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
               <label style={{ whiteSpace: 'nowrap', fontWeight: 'bold' }}>📡 Quick Select:</label>
               <select onChange={handlePresetChange} style={{ padding: '4px 8px', borderRadius: '4px', minWidth: '200px' }}>
                 {SAT_PRESETS.map((p, i) => <option key={i} value={i}>{p.label}</option>)}
               </select>
               {satName && <span style={{ color: '#eee', fontWeight: 'bold' }}>🛰️ {satName}</span>}
+              <span style={{ borderLeft: '1px solid rgba(255,255,255,0.2)', height: '20px', margin: '0 4px' }} />
+              <label style={{ fontSize: '0.85em', color: '#aaa', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                📅 <input type="number" min="1" max="72" value={passHours} onChange={e => setPassHours(parseInt(e.target.value) || 24)} style={{ width: '40px', fontFamily: 'monospace' }} />h
+              </label>
+              <button
+                onClick={() => {
+                  setPassComputing(true);
+                  setTimeout(() => {
+                    const results = predictPasses(tleLine1, tleLine2, syncLat, syncLon, gsAlt, passHours);
+                    setPassData(results);
+                    setPassComputing(false);
+                  }, 50);
+                }}
+                disabled={passComputing}
+                style={{ padding: '3px 10px', background: '#28a745', color: 'white', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: passComputing ? 'wait' : 'pointer', fontSize: '0.85em' }}
+              >
+                {passComputing ? '⏳...' : '🔍 Predict Passes'}
+              </button>
+              {passData.length > 0 && <small style={{ color: '#4ecdc4' }}>{passData.length} passes found</small>}
             </div>
             {/* Milestone 19: NORAD ID + Fetch Button */}
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -1092,10 +1111,12 @@ function App() {
                 <label style={{ fontSize: '0.85em', color: '#ccc', display: 'flex', alignItems: 'center', gap: '4px' }}>
                   时长(min): <input type="number" min={0} max={120} value={denseDurationMin} onChange={e => setDenseDurationMin(Math.max(0, parseInt(e.target.value) || 0))} style={{ width: '55px', fontFamily: 'monospace' }} title="0 = 自动(整个过顶)" />
                 </label>
-                <label style={{ fontSize: '0.85em', color: '#ccc', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  起始: <input type="text" value={denseStartTimeStr} onChange={e => setDenseStartTimeStr(e.target.value)} placeholder="自动" style={{ width: '150px', fontFamily: 'monospace', fontSize: '0.9em' }} title="ISO格式, 留空=自动选最高仰角pass" />
+                <label style={{ fontSize: '0.85em', color: '#ccc', display: 'flex', alignItems: 'center', gap: '4px' }}
+                  title={"起始时间选择说明:\n\n留空(自动): 搜索未来72h内最高仰角的pass,从AOS前2min开始\n手动: 输入ISO 8601格式, 如 2026-03-15T12:00:00Z (UTC)\n或本地时间: 2026-03-15T20:00:00+08:00\n\n提示: 可从Pass Prediction表格复制AOS时间"}
+                >
+                  起始: <input type="text" value={denseStartTimeStr} onChange={e => setDenseStartTimeStr(e.target.value)} placeholder="自动(选最高pass)" style={{ width: '180px', fontFamily: 'monospace', fontSize: '0.9em' }} />
                 </label>
-                <small style={{ color: '#666', width: '100%' }}>间隔{denseStepMs}ms, {denseDurationMin > 0 ? denseDurationMin + 'min' : '整个过顶'}, {denseStartTimeStr || '自动选择最高pass'}</small>
+                <small style={{ color: '#666', width: '100%' }}>间隔{denseStepMs}ms · {denseDurationMin > 0 ? denseDurationMin + 'min' : '自动整个过顶'} · {denseStartTimeStr ? '手动: ' + denseStartTimeStr : '自动: 72h内最高仰角pass'}</small>
                 {activeProjectManifest && (
                   <small style={{ color: '#4ecdc4', width: '100%' }}>
                     Active Task_ID: {activeProjectManifest.Task_ID.slice(0, 8)}...
@@ -1111,28 +1132,8 @@ function App() {
             )}
             <small style={{ color: '#888' }}>Ground Station coordinates are derived from the 'Live Sync Source' panel below.</small>
 
-            {/* Milestone 21: Pass Prediction */}
-            <div style={{ marginTop: '10px', padding: '10px', border: '1px dashed rgba(78,205,196,0.5)', borderRadius: '5px', background: 'rgba(0,0,0,0.2)' }}>
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                <strong>📅 Pass Prediction</strong>
-                <label>Hours ahead:
-                  <input type="number" min="1" max="72" value={passHours} onChange={e => setPassHours(parseInt(e.target.value) || 24)} style={{ width: '50px', marginLeft: '4px' }} />
-                </label>
-                <button
-                  onClick={() => {
-                    setPassComputing(true);
-                    setTimeout(() => {
-                      const results = predictPasses(tleLine1, tleLine2, syncLat, syncLon, gsAlt, passHours);
-                      setPassData(results);
-                      setPassComputing(false);
-                    }, 50);
-                  }}
-                  disabled={passComputing}
-                  style={{ padding: '4px 12px', background: '#28a745', color: 'white', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: passComputing ? 'wait' : 'pointer' }}
-                >
-                  {passComputing ? '⏳ Computing...' : '🔍 Predict Passes'}
-                </button>
-              </div>
+            {/* Pass Prediction results table */}
+            <div style={{ marginTop: '6px', padding: '8px', borderRadius: '5px', background: 'rgba(0,0,0,0.15)' }}>
               {passData.length > 0 && (
                 <div style={{ marginTop: '8px', overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85em', color: '#ddd' }}>
