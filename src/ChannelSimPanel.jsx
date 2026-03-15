@@ -1743,7 +1743,7 @@ export default function ChannelSimPanel({
                                     }}
                                     title="Toggle between natively generated SGP4 CIR and imported Ray-Tracing CIR"
                                 >
-                                    🔄 {viewMode === 'native' ? 'View: Native CIR' : 'View: RT CIR (Imported)'}
+                                    🔄 <span style={{display:'inline-block',width:'10em',textAlign:'left'}}>{viewMode === 'native' ? 'Native CIR' : 'RT CIR (Imported)'}</span>
                                 </button>
                             )}
 
