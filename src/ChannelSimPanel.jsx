@@ -170,13 +170,11 @@ export default function ChannelSimPanel({
                 linkParams = applyCalibration(linkParams, calibProfile);
             }
             let result;
-            // Priority: 1) linked trajectory samples (handshake), 2) imported timeline timestamps, 3) auto-find pass
-            const effectiveSamples = (linkedTrajectorySamples && linkedTrajectorySamples.length > 0)
-                ? linkedTrajectorySamples
-                : null;
-            // If no handshake but imported CIR exists with timestamps, use those for A/B comparison
-            const importedTimestamps = (!effectiveSamples && importedTimeline && importedTimeline.length > 0)
-                ? importedTimeline.filter(f => f.time || f.elevation > 0).map(f => ({
+            // Priority: 1) imported CIR geometry (A/B comparison), 2) linked trajectory (SGP4), 3) auto-find pass
+            // When imported CIR exists, ALWAYS use its exact geometry — never re-propagate via SGP4
+            // because the imported data may use a different satellite than the currently loaded TLE
+            const importedGeometry = (importedTimeline && importedTimeline.length > 0)
+                ? importedTimeline.filter(f => f.elevation > 0 && f.slantRange > 0).map(f => ({
                     time: f.time,
                     elevation: f.elevation,
                     azimuth: f.azimuth,
@@ -186,19 +184,18 @@ export default function ChannelSimPanel({
                   }))
                 : null;
 
-            if (effectiveSamples && effectiveSamples.length > 0) {
-                const timestamps = effectiveSamples.map(s => new Date(s.time));
+            if (importedGeometry && importedGeometry.length > 0) {
+                // A/B comparison: use exact geometry from imported CIR trajectory
+                result = generateChannelTimeSeriesFromGeometry(importedGeometry, linkParams);
+                setStatusMsg('\u2705 A/B: Generated native CIR at ' + importedGeometry.length + ' imported trajectory points (El ' + importedGeometry[0].elevation.toFixed(0) + '\u00b0\u2192' + importedGeometry[Math.floor(importedGeometry.length/2)].elevation.toFixed(0) + '\u00b0\u2192' + importedGeometry[importedGeometry.length-1].elevation.toFixed(0) + '\u00b0)');
+            } else if (linkedTrajectorySamples && linkedTrajectorySamples.length > 0) {
+                const timestamps = linkedTrajectorySamples.map(s => new Date(s.time));
                 result = generateChannelTimeSeriesForTimestamps(
                     tleLine1, tleLine2,
                     gsLat, gsLon, gsAlt,
                     timestamps,
                     linkParams
                 );
-            } else if (importedTimestamps && importedTimestamps.length > 0) {
-                // A/B comparison: use exact geometry (el/az/range) from imported CIR frames
-                // Do NOT re-propagate via SGP4 — the imported data may use a different satellite/TLE
-                result = generateChannelTimeSeriesFromGeometry(importedTimestamps, linkParams);
-                setStatusMsg('\u2705 Generated native CIR using imported trajectory geometry (' + importedTimestamps.length + ' points) for A/B comparison.');
             } else {
                 result = generateChannelTimeSeries(
                     tleLine1, tleLine2,
