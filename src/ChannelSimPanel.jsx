@@ -84,7 +84,7 @@ export default function ChannelSimPanel({
     // === External CIR Import (ZIP of .mat frames) ===
     const [importInfo, setImportInfo] = useState(null);
     const [isCirPlaying, setIsCirPlaying] = useState(false);
-    const [cirFps, setCirFps] = useState(5);
+    const [cirFps, setCirFps] = useState(1);
 
     // === Pass Search State ===
     const [passes, setPasses] = useState([]);

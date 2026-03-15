@@ -458,8 +458,33 @@ function App() {
   }
 
   async function handleExportWgs84Trajectory() {
-    const startTime = new Date();
-    const trajectoryConfig = { startTime, durationMs: 60 * 1000, stepMs: 1 };
+    // Determine start time
+    let startTime;
+    if (denseStartTimeStr && denseStartTimeStr.trim()) {
+      startTime = new Date(denseStartTimeStr.trim());
+      if (isNaN(startTime.getTime())) startTime = new Date();
+    } else {
+      startTime = new Date();
+    }
+
+    // Determine duration
+    let durationMs;
+    if (denseDurationMin > 0) {
+      durationMs = denseDurationMin * 60 * 1000;
+    } else {
+      // Auto: find next pass and use its duration
+      const passes = predictPasses(tleLine1, tleLine2, syncLat, syncLon, gsAlt, 72, 0);
+      if (passes && passes.length > 0) {
+        const best = passes.reduce((a, b) => b.maxElev > a.maxElev ? b : a, passes[0]);
+        startTime = new Date(best.aos.getTime() - 2 * 60000);
+        const endTime = new Date(best.los.getTime() + 2 * 60000);
+        durationMs = endTime.getTime() - startTime.getTime();
+      } else {
+        durationMs = 10 * 60 * 1000; // fallback 10 min
+      }
+    }
+
+    const trajectoryConfig = { startTime, durationMs, stepMs: denseStepMs };
     const trajectory = generateTrajectoryExport(tleLine1, tleLine2, syncLat, syncLon, gsAlt, trajectoryConfig);
     if (!trajectory.length) {
       setTleFetchError('Failed to export WGS84 trajectory. Please verify the current TLE lines.');
@@ -606,6 +631,9 @@ function App() {
 
   const [satName, setSatName] = useState('ISS (ZARYA)');
   const [streetAzimuth, setStreetAzimuth] = useState('');
+  const [denseStepMs, setDenseStepMs] = useState(100);
+  const [denseDurationMin, setDenseDurationMin] = useState(0);  // 0 = auto (entire pass)
+  const [denseStartTimeStr, setDenseStartTimeStr] = useState('');  // empty = auto
   const [applyEffectiveAlt, setApplyEffectiveAlt] = useState(true);
   const [noradId, setNoradId] = useState('25544');
   const [tleFetching, setTleFetching] = useState(false);
@@ -1058,7 +1086,16 @@ function App() {
                 >
                   ⬇️ Export Simulation Project (Dense)
                 </button>
-                <small style={{ color: '#666' }}>60s window, 1ms interval, starting from NOW.</small>
+                <label style={{ fontSize: '0.85em', color: '#ccc', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  间隔(ms): <input type="number" min={1} max={10000} value={denseStepMs} onChange={e => setDenseStepMs(Math.max(1, parseInt(e.target.value) || 100))} style={{ width: '65px', fontFamily: 'monospace' }} />
+                </label>
+                <label style={{ fontSize: '0.85em', color: '#ccc', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  时长(min): <input type="number" min={0} max={120} value={denseDurationMin} onChange={e => setDenseDurationMin(Math.max(0, parseInt(e.target.value) || 0))} style={{ width: '55px', fontFamily: 'monospace' }} title="0 = 自动(整个过顶)" />
+                </label>
+                <label style={{ fontSize: '0.85em', color: '#ccc', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  起始: <input type="text" value={denseStartTimeStr} onChange={e => setDenseStartTimeStr(e.target.value)} placeholder="自动" style={{ width: '150px', fontFamily: 'monospace', fontSize: '0.9em' }} title="ISO格式, 留空=自动选最高仰角pass" />
+                </label>
+                <small style={{ color: '#666', width: '100%' }}>间隔{denseStepMs}ms, {denseDurationMin > 0 ? denseDurationMin + 'min' : '整个过顶'}, {denseStartTimeStr || '自动选择最高pass'}</small>
                 {activeProjectManifest && (
                   <small style={{ color: '#4ecdc4', width: '100%' }}>
                     Active Task_ID: {activeProjectManifest.Task_ID.slice(0, 8)}...
