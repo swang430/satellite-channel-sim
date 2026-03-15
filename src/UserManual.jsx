@@ -44,7 +44,7 @@ export default function UserManual({ onClose }) {
                         <h1 style={{ fontSize: '1.5em', color: '#fff', margin: '0 0 4px 0' }}>
                             📖 卫星信道仿真系统 — 使用手册
                         </h1>
-                        <div style={{ fontSize: '0.85em', color: '#888' }}>Satellite Channel Propagation Simulator v2.1</div>
+                        <div style={{ fontSize: '0.85em', color: '#888' }}>Satellite Channel Propagation Simulator v2.2</div>
                     </div>
                     <button onClick={onClose} style={{
                         background: 'rgba(255,100,100,0.15)', border: '1px solid rgba(255,100,100,0.4)',
@@ -67,7 +67,9 @@ export default function UserManual({ onClose }) {
                             ['7', '数据导出'],
                             ['8', '校准数据格式规范'],
                             ['9', '物理常识验证模块'],
-                            ['10', '图电一体化与联动展示']
+                            ['10', '图电一体化与联动展示'],
+                            ['11', 'RT CIR 导入与 A/B 对比'],
+                            ['12', 'Dense 导出与轨迹生成']
                         ].map(([n, title]) => (
                             <div key={n} style={{ color: '#aaa' }}>
                                 <span style={{ color: '#4ecdc4', fontWeight: 'bold' }}>{n}.</span> {title}
@@ -94,6 +96,8 @@ export default function UserManual({ onClose }) {
                             <tr><td style={tdStyle}>📡 信道仿真</td><td style={tdStyle}>时间序列生成、CIR 多径建模、快衰落（闪烁）</td></tr>
                             <tr><td style={tdStyle}>🎯 地面校准</td><td style={tdStyle}>多参数 Gauss-Newton 优化、已知卫星参考库</td></tr>
                             <tr><td style={tdStyle}>🌦️ 天气同步</td><td style={tdStyle}>Open-Meteo API 实时/JSON 回放</td></tr>
+                            <tr><td style={tdStyle}>🔬 RT 对比</td><td style={tdStyle}>导入射线追踪 CIR，与原生模型 A/B 同轨迹对比</td></tr>
+                            <tr><td style={tdStyle}>📦 Dense 导出</td><td style={tdStyle}>可配间隔/时长/起始的密集轨迹导出</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -151,7 +155,7 @@ export default function UserManual({ onClose }) {
                             <tr><td style={tdStyle}>Freq (GHz)</td><td style={tdStyle}>工作频率</td><td style={tdStyle}>0.3 ~ 30</td></tr>
                             <tr><td style={tdStyle}>EIRP (dBW)</td><td style={tdStyle}>等效全向辐射功率</td><td style={tdStyle}>20 ~ 60</td></tr>
                             <tr><td style={tdStyle}>G/T (dB/K)</td><td style={tdStyle}>接收品质因数</td><td style={tdStyle}>10 ~ 45</td></tr>
-                            <tr><td style={tdStyle}>Rain Rate (mm/h)</td><td style={tdStyle}>降雨率</td><td style={tdStyle}>0 ~ 100</td></tr>
+                            <tr><td style={tdStyle}>Rain Rate (mm/h)</td><td style={tdStyle}>降雨率（默认 0）</td><td style={tdStyle}>0 ~ 100</td></tr>
                             <tr><td style={tdStyle}>TEC</td><td style={tdStyle}>总电子含量 (TECU)</td><td style={tdStyle}>10 ~ 100</td></tr>
                         </tbody>
                     </table>
@@ -414,6 +418,71 @@ export default function UserManual({ onClose }) {
                     </ol>
                 </div>
 
+                {/* 11. RT CIR 导入与 A/B 对比 */}
+                <div style={sectionStyle}>
+                    <h2 style={h2Style}>11. RT CIR 导入与 A/B 对比 🔬</h2>
+                    <p>支持导入外部射线追踪（Ray Tracing）引擎生成的 CIR 数据，与系统原生 3GPP/ITU 模型进行 A/B 对比。</p>
+
+                    <h3 style={h3Style}>导入格式</h3>
+                    <p>将以下文件打包为 ZIP 后拖入 CIR 面板：</p>
+                    <table style={tableStyle}>
+                        <thead><tr>
+                            <th style={thStyle}>文件</th><th style={thStyle}>格式</th><th style={thStyle}>说明</th>
+                        </tr></thead>
+                        <tbody>
+                            <tr><td style={tdStyle}><code>frame_*.mat</code></td><td style={tdStyle}>MATLAB .mat</td><td style={tdStyle}>每帧包含 RaysProperties 和 NumberRays</td></tr>
+                            <tr><td style={tdStyle}><code>trajectory.csv</code></td><td style={tdStyle}>CSV</td><td style={tdStyle}>每帧对应的卫星位置（el/az/range/time）</td></tr>
+                            <tr><td style={tdStyle}><code>manifest.json</code></td><td style={tdStyle}>JSON</td><td style={tdStyle}>可选: 卫星TLE、地面站坐标、任务ID</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h3 style={h3Style}>A/B 对比机制</h3>
+                    <p>点击 <span style={codeStyle}>🚀 Generate</span> 时，如果已导入 RT CIR，系统会：</p>
+                    <ol style={{ paddingLeft: '20px', fontSize: '0.9em' }}>
+                        <li><strong>使用相同轨迹</strong>：直接取导入帧的 el/az/range 几何参数（不做 SGP4 重算），确保两种 CIR 在完全相同的卫星位置下生成</li>
+                        <li><strong>原生 CIR 画布</strong>：显示 FSPL、Rx、SNR、DS、Bc、Doppler</li>
+                        <li><strong>RT CIR 画布</strong>：显示 RT PathLoss 和实际多径结构</li>
+                        <li>通过 <span style={codeStyle}>🔄 Native CIR / RT CIR</span> 按钮在两个视图间切换</li>
+                    </ol>
+
+                    <div style={warnStyle}>
+                        <strong>⚠️ 轨迹一致性：</strong>RT 数据可能使用不同于当前 TLE 的卫星轨道。
+                        系统会自动从 <code style={codeStyle}>trajectory.csv</code> 提取精确几何参数，
+                        绕过 SGP4 传播，避免因卫星不同导致仰角/斜距错误。
+                    </div>
+                </div>
+
+                {/* 12. Dense 导出与轨迹生成 */}
+                <div style={sectionStyle}>
+                    <h2 style={h2Style}>12. Dense 导出与轨迹生成 📦</h2>
+                    <p><span style={codeStyle}>⬇️ Export Simulation Project (Dense)</span> 用于生成密集采样的卫星轨迹文件，供外部仿真平台消费。</p>
+
+                    <h3 style={h3Style}>可配置参数</h3>
+                    <table style={tableStyle}>
+                        <thead><tr>
+                            <th style={thStyle}>参数</th><th style={thStyle}>默认值</th><th style={thStyle}>说明</th>
+                        </tr></thead>
+                        <tbody>
+                            <tr><td style={tdStyle}>采样间隔 (ms)</td><td style={tdStyle}>100</td><td style={tdStyle}>轨迹点之间的时间间隔，可设 1ms~10000ms</td></tr>
+                            <tr><td style={tdStyle}>时长 (min)</td><td style={tdStyle}>0 (自动)</td><td style={tdStyle}>0 = 自动选择整个过顶窗口；&gt;0 = 手动指定分钟</td></tr>
+                            <tr><td style={tdStyle}>起始时间</td><td style={tdStyle}>自动</td><td style={tdStyle}>留空 = 搜索72h内最高仰角pass的AOS-2min</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h3 style={h3Style}>起始时间格式</h3>
+                    <p>手动输入时使用 <strong>ISO 8601</strong> 格式：</p>
+                    <ul style={{ paddingLeft: '20px', fontSize: '0.9em', color: '#ccc' }}>
+                        <li>UTC: <code style={codeStyle}>2026-03-15T12:00:00Z</code></li>
+                        <li>带时区: <code style={codeStyle}>2026-03-15T20:00:00+08:00</code></li>
+                        <li>留空则自动搜索未来72h最高仰角pass</li>
+                    </ul>
+
+                    <div style={tipStyle}>
+                        <strong>💡 提示：</strong>可先运行 Pass Prediction（位于卫星选择行右侧），
+                        从结果表中找到合适的过境，再将 AOS 时间复制到起始时间字段。
+                    </div>
+                </div>
+
                 {/* 已知卫星 ID 参考 */}
                 <div style={sectionStyle}>
                     <h2 style={h2Style}>附录：已知卫星 ID 速查</h2>
@@ -434,7 +503,7 @@ export default function UserManual({ onClose }) {
 
                 {/* Footer */}
                 <div style={{ textAlign: 'center', padding: '10px', color: '#555', fontSize: '0.8em', borderTop: '1px solid rgba(255,255,255,0.05)', marginTop: '10px' }}>
-                    Satellite Channel Propagation Simulator v2.1 | 加入常识验证模块 2026-03
+                    Satellite Channel Propagation Simulator v2.2 | RT CIR A/B 对比 + Dense 导出增强 2026-03
                 </div>
             </div>
         </div>
