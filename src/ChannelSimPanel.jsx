@@ -894,7 +894,7 @@ export default function ChannelSimPanel({
         ctx.textAlign = 'right';
         const powerLabel = frame.isImportedFrame
             ? 'RT PathLoss: ' + Math.abs(frame.rtPathLoss ?? frame.rxPowerDbm).toFixed(1) + ' dB'
-            : 'Rx: ' + (frame.rxPowerDbm ?? 0).toFixed(1) + ' dBm | SNR: ' + (frame.snrDb ?? 0).toFixed(1) + ' dB';
+            : 'PathLoss: ' + (frame.absoluteFspl ?? 0).toFixed(1) + ' dB | Rx: ' + (frame.rxPowerDbm ?? 0).toFixed(1) + ' dBm | SNR: ' + (frame.snrDb ?? 0).toFixed(1) + ' dB';
         ctx.fillText(powerLabel + ' | El: ' + frame.elevation.toFixed(1) + '\u00b0', W - padR, 15);
         ctx.fillText('DS(\u03c3_\u03c4): ' + rmsDelaySpread_ns.toFixed(2) + ' ns | Bc: ' + coherenceBandwidth_MHz.toFixed(1) + ' MHz', W - padR, 29);
         const dopHz = frame.dopplerHz ?? 0;

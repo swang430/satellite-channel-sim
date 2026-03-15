@@ -357,7 +357,7 @@ function App() {
 
   const [params, setParams] = useState({
     freq: 30.0,
-    rainRate: 20.0,
+    rainRate: 0,
     elevation: 40.0,
     env: 'suburban',
     eirp: 60.0,
