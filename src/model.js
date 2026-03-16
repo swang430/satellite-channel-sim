@@ -840,7 +840,7 @@ export function computeCIR(params) {
     });
   }
 
-  // --- Tap N: 电离层色散分量 ---
+  // --- Tap N: 电离层色散分量 (ITU-R P.531 / 3GPP TR 38.811 附加效应) ---
   const tecVal = tec || 50;
   const dispersionNs = (2.0 * 134.0 * tecVal * 0.4) / (Math.pow(freq, 3) * sinElev);
   if (dispersionNs > 0.01) {
