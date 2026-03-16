@@ -22,6 +22,7 @@
 12. [RT CIR 导入与 A/B 对比](#12-rt-cir-导入与-ab-对比)
 13. [Dense 导出与轨迹生成](#13-dense-导出与轨迹生成)
 14. [附录：已知卫星 ID 速查](#附录已知卫星-id-速查)
+15. [开源依赖与 IP 授权](#14-开源依赖与-ip-授权)
 
 ---
 
@@ -485,5 +486,82 @@ CIR_Tap1_Label, CIR_Tap1_ExcessDelay, CIR_Tap1_Amplitude, CIR_Tap1_Phase, ...
 | `BEIDOU_3_MEO` | 北斗三号 MEO | L |
 
 ---
+
+---
+
+## 14. 开源依赖与 IP 授权
+
+### 开源依赖调查
+
+本项目使用以下开源软件：
+
+| 依赖 | 版本 | 协议 | 类型 | 传染性 |
+|------|------|------|------|--------|
+| React | 19.2 | MIT | 运行时 | ❌ 无 |
+| React DOM | 19.2 | MIT | 运行时 | ❌ 无 |
+| Chart.js | 4.5 | MIT | 运行时 | ❌ 无 |
+| react-chartjs-2 | 5.3 | MIT | 运行时 | ❌ 无 |
+| satellite.js | 6.0 | MIT | 运行时 | ❌ 无 |
+| JSZip | 3.10 | MIT / GPL-3.0 (双协议) | 运行时 | ❌ 选择 MIT |
+| mathjs | 15.1 | Apache-2.0 | 运行时 | ❌ 无 |
+| **mat-for-js** | **1.1** | **GPL-3.0-or-later** | **运行时** | **⚠️ Copyleft 传染** |
+| Vite | 7.3 | MIT | 仅构建 | ❌ 无 |
+| ESLint | 9.39 | MIT | 仅开发 | ❌ 无 |
+
+### 协议分析
+
+> ⚠️ **关键风险：mat-for-js 使用 GPL-3.0-or-later 协议**
+
+GPL-3.0 是一个强 copyleft 协议，具有以下要求：
+- **传染性**：与 GPL 代码链接的整个程序必须以 GPL-3.0 或兼容协议发布
+- **源代码公开**：分发时必须提供完整源代码
+- **不可闭源**：不得以专有/闭源形式分发
+
+由于 `mat-for-js` 是运行时依赖（在浏览器端直接解析 .mat 文件），属于 GPL 定义的"链接"范畴。因此：
+
+### 项目授权规则
+
+**本项目整体采用 GPL-3.0-or-later 协议发布。**
+
+这意味着：
+
+1. ✅ **可以自由使用、修改、分发本软件**
+2. ✅ **可以内部部署和使用，无需公开源码**（GPL 仅在"分发"时生效）
+3. ✅ **可以提供基于本软件的网络服务**（GPL-3.0 不含 AGPL 的网络条款）
+4. ⚠️ **如果向第三方分发（含二进制/打包形式），必须同时提供源代码**
+5. ⚠️ **修改后的版本必须以 GPL-3.0 或兼容协议发布**
+6. ❌ **不得以闭源/专有形式向外部分发**
+
+### 替代方案（如需闭源分发）
+
+如果未来需要以非 GPL 协议发布，可通过以下方式消除 GPL 传染：
+
+| 方案 | 可行性 | 说明 |
+|------|--------|------|
+| 替换 mat-for-js | ⭐⭐⭐ | 自行实现 MAT v5 解析器或使用 MIT 协议的替代库 |
+| 服务端隔离 | ⭐⭐ | 将 .mat 解析移到独立后端服务，前端通过 API 调用 |
+| 联系作者获取商业协议 | ⭐ | 部分 GPL 项目提供双协议（商业 + 开源） |
+
+---
+
+## 授权声明
+
+```
+Copyright (C) 2026 swang430
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+```
+
 
 *Satellite Channel Propagation Simulator v2.2 | 2026-03*
