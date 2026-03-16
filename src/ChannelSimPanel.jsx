@@ -1185,7 +1185,7 @@ export default function ChannelSimPanel({
 
                 <div>
                     <div style={inputGroupStyle}>
-                        <strong style={{ fontSize: '0.9em' }}>{'\u2699\ufe0f'} Channel Engine</strong>
+                        <strong style={{ fontSize: '0.9em' }} title="Based on 3GPP TR 38.811 & ITU-R Models">{'\u2699\ufe0f'} Channel Engine <span style={{ fontSize: '0.8em', color: '#888', fontWeight: 'normal' }}>(3GPP TR 38.811 / ITU-R)</span></strong>
                         <label style={labelStyle}>Env:
                             <select value={env} onChange={e => setEnv(e.target.value)} style={selectStyle}>
                                 <option value="suburban">suburban</option>
