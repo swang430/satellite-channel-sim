@@ -3,13 +3,67 @@ const satellite = satelliteModule.degreesToRadians ? satelliteModule : satellite
 import { create, all } from 'mathjs';
 const math = create(all);
 
-const RAIN_COEFFS = {
-  2.2: { k: 0.0002, alpha: 0.95 },
-  12.0: { k: 0.018, alpha: 1.15 },
-  30.0: { k: 0.187, alpha: 1.021 }, // Ka-band vertical
-  40.0: { k: 0.35, alpha: 0.93 },
-  50.0: { k: 0.55, alpha: 0.88 }
-};
+// ITU-R P.838-3 Table 1: Specific rain attenuation coefficients (horizontal polarization).
+// Sorted by frequency (GHz). Used for log-linear interpolation per the standard.
+const RAIN_COEFFS_TABLE = [
+  { f: 1,   k: 0.0000308, alpha: 0.8592 },
+  { f: 2,   k: 0.000154,  alpha: 0.9630 },
+  { f: 4,   k: 0.000650,  alpha: 1.1210 },
+  { f: 6,   k: 0.00175,   alpha: 1.3080 },
+  { f: 7,   k: 0.00301,   alpha: 1.3320 },
+  { f: 8,   k: 0.00454,   alpha: 1.3270 },
+  { f: 10,  k: 0.0101,    alpha: 1.2760 },
+  { f: 12,  k: 0.0188,    alpha: 1.2170 },
+  { f: 15,  k: 0.0367,    alpha: 1.1540 },
+  { f: 20,  k: 0.0751,    alpha: 1.0990 },
+  { f: 25,  k: 0.1240,    alpha: 1.0610 },
+  { f: 30,  k: 0.1870,    alpha: 1.0210 },
+  { f: 35,  k: 0.2630,    alpha: 0.9790 },
+  { f: 40,  k: 0.3500,    alpha: 0.9390 },
+  { f: 45,  k: 0.4420,    alpha: 0.9030 },
+  { f: 50,  k: 0.5360,    alpha: 0.8730 },
+  { f: 60,  k: 0.7070,    alpha: 0.8260 },
+  { f: 80,  k: 0.9750,    alpha: 0.7660 },
+  { f: 100, k: 1.1200,    alpha: 0.7270 },
+];
+
+/**
+ * Interpolate ITU-R P.838-3 rain attenuation coefficients k and α at the
+ * given frequency using log-linear interpolation in the frequency domain.
+ * k is interpolated in log space; α is interpolated linearly — both per the standard.
+ * Frequencies outside the table range are clamped to the nearest endpoint.
+ *
+ * @param {number} freq_GHz - Carrier frequency in GHz
+ * @returns {{ k: number, alpha: number }}
+ */
+function getRainCoeffs(freq_GHz) {
+  const table = RAIN_COEFFS_TABLE;
+  // Guard: treat missing/invalid freq as 30 GHz (Ka-band app default)
+  const freqSafe = (typeof freq_GHz === 'number' && isFinite(freq_GHz) && freq_GHz > 0) ? freq_GHz : 30.0;
+  const f = Math.max(table[0].f, Math.min(table[table.length - 1].f, freqSafe));
+
+  // Find the two bracketing entries
+  let lo = table[0];
+  let hi = table[table.length - 1];
+  for (let i = 0; i < table.length - 1; i++) {
+    if (table[i].f <= f && table[i + 1].f >= f) {
+      lo = table[i];
+      hi = table[i + 1];
+      break;
+    }
+  }
+
+  // Exact match — no interpolation needed
+  if (lo.f === hi.f || lo.f === f) return { k: lo.k, alpha: lo.alpha };
+  if (hi.f === f) return { k: hi.k, alpha: hi.alpha };
+
+  // Log-linear interpolation: t ∈ [0, 1] in log(freq) space
+  const t = (Math.log(f) - Math.log(lo.f)) / (Math.log(hi.f) - Math.log(lo.f));
+  const k = Math.exp(Math.log(lo.k) + t * (Math.log(hi.k) - Math.log(lo.k)));
+  const alpha = lo.alpha + t * (hi.alpha - lo.alpha);
+
+  return { k, alpha };
+}
 
 // Deterministic Sum-of-Sinusoids for pseudo-random fading without Math.random
 function getSoSFade(t_sec) {
@@ -24,7 +78,7 @@ function getSoSFade(t_sec) {
 }
 
 export function calculateLinkBudget(params) {
-  const { freq, rainRate, elevation, env, tec = 50.0, xpdAnt = 35.0, correctionFactor = 1.0, slantRange = 35786, hpbw = 2.0, simTime = 0 } = params;
+  const { freq = 30.0, rainRate = 0, elevation = 45, env, tec = 50.0, xpdAnt = 35.0, correctionFactor = 1.0, slantRange = 35786, hpbw = 2.0, simTime = 0 } = params;
 
   // === Elevation Pre-processing: Atmospheric Refraction (ITU-R) ===
   const trueElev = Math.max(0, elevation);
@@ -35,16 +89,8 @@ export function calculateLinkBudget(params) {
   const pointingLoss = hpbw > 0 ? 12.0 * Math.pow(refractionCorrection / hpbw, 2) : 0;
   const effElev = apparentElevation;
 
-  let k = 0.018, alpha = 1.15;
-  let minDiff = 100;
-  for (const [f, c] of Object.entries(RAIN_COEFFS)) {
-    const diff = Math.abs(parseFloat(f) - freq);
-    if (diff < minDiff) {
-      minDiff = diff;
-      k = c.k;
-      alpha = c.alpha;
-    }
-  }
+  // ITU-R P.838-3 log-linear interpolation of k and α
+  const { k, alpha } = getRainCoeffs(freq);
 
   // Apply correction factor to the gamma calculation (Rain attenuation multiplier)
   const gamma = k * Math.pow(rainRate, alpha) * correctionFactor;
@@ -148,9 +194,12 @@ export function calculateLinkBudget(params) {
   // === Milestones 18: Ionospheric Group Delay & Dispersion ===
   const tecVal = params.tec !== undefined ? params.tec : 50;
   const bwMHz = params.bandwidth !== undefined ? params.bandwidth : 400;
-  const groupDelayNs = (134.0 * tecVal) / (freq * freq * sinElev);
+  // ITU-R / GPS ionospheric delay: ∆t(ns) = 40.3/c * TEC(TECU) / f_GHz² * unit_conversion
+  // Derived constant: 40.3 / (3e8 m/s) * 1e16 (TECU→el/m²) / (1e9 GHz→Hz)² * 1e9 (s→ns) ≈ 1.3433
+  const IONO_CONST = 1.3433; // ns·GHz²/TECU
+  const groupDelayNs = (IONO_CONST * tecVal) / (freq * freq * sinElev);
   // Derivative of Delay wrt frequency * bandwidth
-  const dispersionNs = (2.0 * 134.0 * tecVal * (bwMHz / 1000.0)) / (Math.pow(freq, 3) * sinElev);
+  const dispersionNs = (2.0 * IONO_CONST * tecVal * (bwMHz / 1000.0)) / (Math.pow(freq, 3) * sinElev);
   // Max Symbol Rate (MBaud) ~ 1 / (2 * dispersion) to avoid severe ISI
   const maxSymbolRateMbaud = dispersionNs > 0.001 ? (1000.0 / (2.0 * dispersionNs)) : 999999;
 
@@ -842,7 +891,7 @@ export function computeCIR(params) {
 
   // --- Tap N: 电离层色散分量 (ITU-R P.531 / 3GPP TR 38.811 附加效应) ---
   const tecVal = tec || 50;
-  const dispersionNs = (2.0 * 134.0 * tecVal * 0.4) / (Math.pow(freq, 3) * sinElev);
+  const dispersionNs = (2.0 * 1.3433 * tecVal * 0.4) / (Math.pow(freq, 3) * sinElev);
   if (dispersionNs > 0.01) {
     const ionoPower_dB = losAmplitude_dB - 30 - 10 * Math.log10(freq); // 电离层散射功率随频率递减
     const ionoAmplitude = Math.pow(10, ionoPower_dB / 20);
