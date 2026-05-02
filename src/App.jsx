@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, BarController, Title, Tooltip, Legend, ScatterController } from 'chart.js';
 import { Line } from 'react-chartjs-2';
 import JSZip from 'jszip';
@@ -844,12 +844,19 @@ function App() {
   };
 
   const currentParams = { ...params, simTime: simTime, disableFastFading };
+
+  // useMemo: only recompute link budget when params or simTime change
+  const linkBudget = useMemo(
+    () => calculateLinkBudget(currentParams),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [JSON.stringify(currentParams)]
+  );
   const {
     attRain, attGas, attCloud, fadeLMS, lossFaraday, omegaDeg,
     totalLoss, xpd, actualFspl, deltaFspl,
     apparentElevation, refractionCorrection, pointingLoss, scanLoss, multipathLoss, tSky, totalAtmosphericLoss, scintLoss, scintillationSigma,
     groupDelayNs, dispersionNs, maxSymbolRateMbaud
-  } = calculateLinkBudget(currentParams);
+  } = linkBudget;
 
   // === Dynamic Sky Noise & Absolute Received Power ===
   const k_boltzmann = 1.380649e-23;
@@ -861,7 +868,10 @@ function App() {
   const rxPowerDbm = (params.eirp || 60.0) + 30 - absoluteLoss + (params.gRx || 42.0);
 
   const currentSnr = Math.max(-10.0, rxPowerDbm - noiseFloorDbm);
-  const { capRank2, capRank1 } = calculateMIMOCapacity(currentSnr, xpd);
+  const { capRank2, capRank1 } = useMemo(
+    () => calculateMIMOCapacity(currentSnr, xpd),
+    [currentSnr, xpd]
+  );
 
   let recommendation = "";
   let statusClass = "ok";
@@ -879,10 +889,12 @@ function App() {
 
   const rainRates = Array.from({ length: 50 }, (_, i) => i * 2);
 
-  const dataRain = rainRates.map(r => {
-    const res = calculateLinkBudget({ ...params, rainRate: r });
-    return res.totalLoss;
-  });
+  // useMemo: rain sweep — only recompute when params change (not on every render)
+  const dataRain = useMemo(
+    () => rainRates.map(r => calculateLinkBudget({ ...params, rainRate: r }).totalLoss),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [JSON.stringify(params)]
+  );
 
   const scatterData = realData.map(d => ({
     x: d.rainRate,
@@ -914,10 +926,13 @@ function App() {
   };
 
   const freqs = [1, 2, 5, 10, 15, 20, 22.2, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70];
-  const dataFreq = freqs.map(f => {
-    const res = calculateLinkBudget({ ...params, freq: f });
-    return res.totalLoss;
-  });
+
+  // useMemo: freq sweep — only recompute when params change
+  const dataFreq = useMemo(
+    () => freqs.map(f => calculateLinkBudget({ ...params, freq: f }).totalLoss),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [JSON.stringify(params)]
+  );
 
   const scatterDataFreq = realData.map(d => ({
     x: d.freq || params.freq, // Support Sweep: use injected freq or fallback to global UI freq

@@ -65,6 +65,124 @@ function getRainCoeffs(freq_GHz) {
   return { k, alpha };
 }
 
+// === ITU-R P.676-12 Annex 2: Atmospheric Gas Attenuation ===
+
+/** φ helper function for P.676-12 oxygen specific attenuation formula. */
+function _p676phi(r_p, r_t, a, b, c, d) {
+  return Math.pow(r_p, a) * Math.pow(r_t, b) * Math.exp(c * (1 - r_p) + d * (1 - r_t));
+}
+
+/**
+ * ITU-R P.676-12 Annex 2 — specific oxygen attenuation γ_o (dB/km).
+ * Valid for f ≤ 54 GHz; clamped above that (60 GHz band not used for satellite links).
+ */
+function _oxygenSpecificAtten(f, r_p, r_t) {
+  if (f <= 0) return 0;
+  const fc = Math.min(f, 53.9); // avoid singularity at 54 GHz
+  const xi1 = _p676phi(r_p, r_t, 0.0717, -1.8132, 0.0156, -1.6515);
+  const xi2 = _p676phi(r_p, r_t, 0.5146, -4.6368, -0.1921, -5.7416);
+  const xi3 = _p676phi(r_p, r_t, 0.3414, -4.9364, 0.5765, -6.9953);
+  const denom54 = Math.pow(Math.max(0.01, 54 - fc), 1.16 * xi1) + 0.83 * xi2;
+  return ((7.2 * Math.pow(r_t, 2.8)) / (fc * fc + 0.34 * r_p * r_p * Math.pow(r_t, 1.6)) +
+          (0.62 * xi3) / denom54) * fc * fc * r_p * r_p * 1e-3;
+}
+
+/**
+ * ITU-R P.676-12 Annex 2 — specific water vapour attenuation γ_w (dB/km).
+ * Captures the 22.235 GHz resonance dominant in the satellite band (1–100 GHz).
+ * @param {number} rho  Water vapour density (g/m³), standard atmosphere ≈ 7.5 g/m³
+ */
+function _waterVaporSpecificAtten(f, rho, r_p, r_t) {
+  if (f <= 0 || rho <= 0) return 0;
+  const eta1 = 0.955 * r_p * Math.pow(r_t, 0.68) + 0.006 * rho;
+  const d22  = (f - 22.235) * (f - 22.235) + 9.42 * eta1 * eta1;
+  const d183 = (f - 183.31) * (f - 183.31) + 11.14 * eta1 * eta1;
+  const d325 = (f - 325.15) * (f - 325.15) + 20.0;
+  const continuum = 0.050 + 0.0021 * rho;
+  return (continuum + 3.6 / d22 + 10.6 / d183 + 0.9 * eta1 / d325) * f * f * rho * r_t * 1e-4;
+}
+
+/**
+ * Slant-path atmospheric gas attenuation using ITU-R P.676-12.
+ * Integrates oxygen and water vapour over effective scale heights
+ * (h_O = 6 km, h_W = 2.1 km) and applies a cosecant path correction.
+ *
+ * @param {number} freq_GHz
+ * @param {number} elevation_deg  — clamped to ≥ 5° for formula validity
+ * @param {object} atm  — { pressure_hPa=1013.25, temperature_C=15, waterVaporDensity_gm3=7.5 }
+ * @returns {number}  Slant-path gas attenuation (dB)
+ */
+function gasAttenuationP676(freq_GHz, elevation_deg, {
+  pressure_hPa = 1013.25,
+  temperature_C = 15.0,
+  waterVaporDensity_gm3 = 7.5
+} = {}) {
+  const f    = Math.max(0.1, freq_GHz);
+  const sinEl = Math.sin(Math.max(5, elevation_deg) * Math.PI / 180);
+  const r_p  = pressure_hPa / 1013.25;
+  const r_t  = 288.15 / (273.15 + temperature_C);
+  const rho  = Math.max(0, waterVaporDensity_gm3);
+
+  const gamma_o = _oxygenSpecificAtten(Math.min(f, 53.9), r_p, r_t);
+  const gamma_w = _waterVaporSpecificAtten(f, rho, r_p, r_t);
+
+  // Zenith path attenuation (effective heights from ITU-R P.676 Table 2)
+  const A_o_zenith = gamma_o * 6.0;  // h_O = 6 km
+  const A_w_zenith = gamma_w * 2.1;  // h_W = 2.1 km
+
+  return (A_o_zenith + A_w_zenith) / sinEl;
+}
+
+// === ITU-R P.840-8: Cloud and Fog Liquid Water Attenuation ===
+
+/**
+ * Cloud specific attenuation coefficient K_l (dB/(km·(g/m³)))
+ * from the double-Debye dielectric model for liquid water (ITU-R P.840-8 / Liebe 1991).
+ * @param {number} freq_GHz
+ * @param {number} temperature_C  Cloud temperature; use 0 °C for a conservative estimate.
+ */
+function cloudKlP840(freq_GHz, temperature_C = 0) {
+  const f   = Math.max(0.1, freq_GHz);
+  const theta = 300 / (273.15 + temperature_C);
+
+  // Liebe 1991 double-Debye parameters
+  const eps_s   = 77.66 + 103.3 * (theta - 1);
+  const eps_1   = 0.0671 * eps_s;
+  const eps_inf = 3.52;
+  const f_d1 = 20.2 - 146 * (theta - 1) + 316 * (theta - 1) ** 2; // GHz
+  const f_d2 = 39.8 * f_d1;                                          // GHz
+
+  const eps_prime = eps_inf +
+    (eps_s - eps_1)   / (1 + (f / f_d1) ** 2) +
+    (eps_1 - eps_inf) / (1 + (f / f_d2) ** 2);
+
+  const eps_pp = f * (eps_s - eps_1)   / (f_d1 * (1 + (f / f_d1) ** 2)) +
+                 f * (eps_1 - eps_inf) / (f_d2 * (1 + (f / f_d2) ** 2));
+
+  // Rayleigh-limit absorption: Im[(ε–1)/(ε+2)] = 3ε'' / ((ε'+2)² + ε''²)
+  const im_term = 3 * eps_pp / ((eps_prime + 2) ** 2 + eps_pp ** 2);
+
+  // K_l [dB/(km·(g/m³))]:  (6π/λ) × Im × (10/ln10) / ρ_water
+  // λ = c/f (m), ρ_water = 1e6 g/m³  →  factor = 6π f×1e9 / (3e8 × 1e6) × (10/ln10) × 1e3
+  const K_l = (6 * Math.PI * f / (3e8 / 1e9)) * im_term * (10 / Math.LN10) * 1e-3;
+  return K_l;
+}
+
+/**
+ * Slant-path cloud/fog liquid water attenuation (ITU-R P.840-8).
+ * A_c = K_l × L / sin(θ)
+ * @param {number} freq_GHz
+ * @param {number} elevation_deg
+ * @param {number} columnarLWC_kgm2  Total columnar liquid water content (kg/m²);
+ *                                   0.5 kg/m² is a typical mid-latitude value.
+ * @param {number} cloudTemp_C       Cloud temperature for K_l (default 0 °C)
+ */
+function cloudAttenuationP840(freq_GHz, elevation_deg, columnarLWC_kgm2 = 0.5, cloudTemp_C = 0) {
+  const sinEl = Math.sin(Math.max(5, elevation_deg) * Math.PI / 180);
+  const K_l = cloudKlP840(freq_GHz, cloudTemp_C);
+  return K_l * columnarLWC_kgm2 / sinEl;
+}
+
 // Deterministic Sum-of-Sinusoids for pseudo-random fading without Math.random
 function getSoSFade(t_sec) {
   if (t_sec === undefined || t_sec === 0) return 0;
@@ -101,17 +219,12 @@ export function calculateLinkBudget(params) {
   const lEff = slantPath * rFactor;
   const attRain = gamma * lEff;
 
-  let attZenithGas = 0.05;
-  if (freq < 10) attZenithGas = 0.05;
-  else if (freq < 20) attZenithGas = 0.2;
-  else if (freq < 35) attZenithGas = 0.3;
-  else if (freq < 50) attZenithGas = 0.8;
-  else attZenithGas = 4.0;
-  const attGas = attZenithGas / Math.sin(elevRad);
+  // ITU-R P.676-12: gas attenuation (oxygen + water vapour)
+  const attGas = gasAttenuationP676(freq, effElev);
 
-  const K_l = 0.0002 * Math.pow(freq, 1.95);
-  const L_content = 0.5; // mm
-  const attCloud = (L_content * K_l) / Math.sin(elevRad);
+  // ITU-R P.840-8: cloud liquid water attenuation
+  const columnarLWC = params.columnarLWC_kgm2 ?? 0.5; // kg/m²; user-overridable
+  const attCloud = cloudAttenuationP840(freq, effElev, columnarLWC);
 
   const totalAtmosphericLoss = attRain + attGas + attCloud + (params.gasAttenOffset_dB || 0);
 
@@ -800,30 +913,20 @@ export function computeCIR(params) {
   // 绝对 FSPL (dB)
   const absoluteFspl = 20 * Math.log10(slantRange) + 20 * Math.log10(freq) + 92.45;
 
-  // 大气总衰减 (复用 calculateLinkBudget 中的逻辑)
-  let k_coeff = 0.018, alpha_coeff = 1.15;
-  let minDiff = 100;
-  for (const [f, c] of Object.entries(RAIN_COEFFS)) {
-    const diff = Math.abs(parseFloat(f) - freq);
-    if (diff < minDiff) { minDiff = diff; k_coeff = c.k; alpha_coeff = c.alpha; }
-  }
+  // 大气总衰减 — 与 calculateLinkBudget 保持一致，使用 ITU-R 标准函数
+  const { k: k_coeff, alpha: alpha_coeff } = getRainCoeffs(freq);
   const gamma = k_coeff * Math.pow(rainRate, alpha_coeff) * correctionFactor;
   const heightRain = 3.0;
   const slantPath = heightRain / sinElev;
   const rFactor = 1 / (1 + 0.045 * slantPath);
   const attRain = gamma * slantPath * rFactor;
 
-  let attZenithGas = 0.05;
-  if (freq < 10) attZenithGas = 0.05;
-  else if (freq < 20) attZenithGas = 0.2;
-  else if (freq < 35) attZenithGas = 0.3;
-  else if (freq < 50) attZenithGas = 0.8;
-  else attZenithGas = 4.0;
-  const attGas = attZenithGas / sinElev;
+  // ITU-R P.676-12: gas attenuation
+  const elevDeg = Math.max(0.1, elevation);
+  const attGas = gasAttenuationP676(freq, elevDeg);
 
-  const K_l = 0.0002 * Math.pow(freq, 1.95);
-  const L_content = 0.5;
-  const attCloud = (L_content * K_l) / sinElev;
+  // ITU-R P.840-8: cloud attenuation
+  const attCloud = cloudAttenuationP840(freq, elevDeg, params.columnarLWC_kgm2 ?? 0.5);
 
   const totalAtmLoss = attRain + attGas + attCloud;
 

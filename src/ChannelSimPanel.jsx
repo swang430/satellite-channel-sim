@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Line, Bar } from 'react-chartjs-2';
 import JSZip from 'jszip';
 import { read as readMat } from 'mat-for-js';
@@ -1024,9 +1024,9 @@ export default function ChannelSimPanel({
     // === Chart Data ===
     const isImportedTimeline = Boolean(importInfo);
     const showAnalyticsPanels = timeline.length > 0 && !isImportedTimeline;
-    const chartLabels = timeline.map(f => f.timeLabel);
+    const chartLabels = useMemo(() => timeline.map(f => f.timeLabel), [timeline]);
 
-    const rxSnrChartData = {
+    const rxSnrChartData = useMemo(() => ({
         labels: chartLabels,
         datasets: [
             {
@@ -1062,7 +1062,7 @@ export default function ChannelSimPanel({
                 fill: true
             }
         ]
-    };
+    }), [timeline, chartLabels]);
 
     const rxSnrChartOpts = {
         responsive: true,
