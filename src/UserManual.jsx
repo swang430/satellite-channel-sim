@@ -44,7 +44,7 @@ export default function UserManual({ onClose }) {
                         <h1 style={{ fontSize: '1.5em', color: '#fff', margin: '0 0 4px 0' }}>
                             📖 卫星信道仿真系统 — 使用手册
                         </h1>
-                        <div style={{ fontSize: '0.85em', color: '#888' }}>Satellite Channel Propagation Simulator v2.2</div>
+                        <div style={{ fontSize: '0.85em', color: '#888' }}>Satellite Channel Propagation Simulator v2.3 — ITU-R P.676-12 / P.840-8 / P.838-3</div>
                     </div>
                     <button onClick={onClose} style={{
                         background: 'rgba(255,100,100,0.15)', border: '1px solid rgba(255,100,100,0.4)',
@@ -134,15 +134,17 @@ export default function UserManual({ onClose }) {
 
                     <table style={tableStyle}>
                         <thead><tr>
-                            <th style={thStyle}>指标</th><th style={thStyle}>说明</th><th style={thStyle}>单位</th>
+                            <th style={thStyle}>指标</th><th style={thStyle}>说明</th><th style={thStyle}>标准</th><th style={thStyle}>单位</th>
                         </tr></thead>
                         <tbody>
-                            <tr><td style={tdStyle}>Free Space Loss</td><td style={tdStyle}>自由空间路径损耗</td><td style={tdStyle}>dB</td></tr>
-                            <tr><td style={tdStyle}>Rain Attenuation</td><td style={tdStyle}>雨衰（ITU-R P.838 模型）</td><td style={tdStyle}>dB</td></tr>
-                            <tr><td style={tdStyle}>Gas Attenuation</td><td style={tdStyle}>氧气 + 水蒸气吸收</td><td style={tdStyle}>dB</td></tr>
-                            <tr><td style={tdStyle}>C/N</td><td style={tdStyle}>载噪比</td><td style={tdStyle}>dB</td></tr>
-                            <tr><td style={tdStyle}>XPD</td><td style={tdStyle}>交叉极化鉴别度</td><td style={tdStyle}>dB</td></tr>
-                            <tr><td style={tdStyle}>Faraday Rotation</td><td style={tdStyle}>电离层法拉第旋转角</td><td style={tdStyle}>deg</td></tr>
+                            <tr><td style={tdStyle}>Free Space Loss</td><td style={tdStyle}>自由空间路径损耗</td><td style={tdStyle}>Friis 方程</td><td style={tdStyle}>dB</td></tr>
+                            <tr><td style={tdStyle}>Rain Attenuation</td><td style={tdStyle}>雨衰，19点对数线性插值</td><td style={tdStyle}>ITU-R P.838-3</td><td style={tdStyle}>dB</td></tr>
+                            <tr><td style={tdStyle}>Gas Attenuation</td><td style={tdStyle}>氧气 + 水蒸气吸收（含22.235 GHz共振）</td><td style={tdStyle}>ITU-R P.676-12</td><td style={tdStyle}>dB</td></tr>
+                            <tr><td style={tdStyle}>Cloud Attenuation</td><td style={tdStyle}>云/雾液态水衰减，双Debye介电模型</td><td style={tdStyle}>ITU-R P.840-8</td><td style={tdStyle}>dB</td></tr>
+                            <tr><td style={tdStyle}>C/N</td><td style={tdStyle}>载噪比</td><td style={tdStyle}>—</td><td style={tdStyle}>dB</td></tr>
+                            <tr><td style={tdStyle}>XPD</td><td style={tdStyle}>交叉极化鉴别度</td><td style={tdStyle}>—</td><td style={tdStyle}>dB</td></tr>
+                            <tr><td style={tdStyle}>Faraday Rotation</td><td style={tdStyle}>电离层法拉第旋转角</td><td style={tdStyle}>ITU-R P.531</td><td style={tdStyle}>deg</td></tr>
+                            <tr><td style={tdStyle}>Group Delay</td><td style={tdStyle}>电离层群延迟（1.3433 ns·GHz²/TECU）</td><td style={tdStyle}>—</td><td style={tdStyle}>ns</td></tr>
                         </tbody>
                     </table>
 
@@ -152,13 +154,25 @@ export default function UserManual({ onClose }) {
                             <th style={thStyle}>参数</th><th style={thStyle}>说明</th><th style={thStyle}>典型范围</th>
                         </tr></thead>
                         <tbody>
-                            <tr><td style={tdStyle}>Freq (GHz)</td><td style={tdStyle}>工作频率</td><td style={tdStyle}>0.3 ~ 30</td></tr>
+                            <tr><td style={tdStyle}>Freq (GHz)</td><td style={tdStyle}>工作频率</td><td style={tdStyle}>0.3 ~ 100</td></tr>
                             <tr><td style={tdStyle}>EIRP (dBW)</td><td style={tdStyle}>等效全向辐射功率</td><td style={tdStyle}>20 ~ 60</td></tr>
                             <tr><td style={tdStyle}>G/T (dB/K)</td><td style={tdStyle}>接收品质因数</td><td style={tdStyle}>10 ~ 45</td></tr>
                             <tr><td style={tdStyle}>Rain Rate (mm/h)</td><td style={tdStyle}>降雨率（默认 0）</td><td style={tdStyle}>0 ~ 100</td></tr>
                             <tr><td style={tdStyle}>TEC</td><td style={tdStyle}>总电子含量 (TECU)</td><td style={tdStyle}>10 ~ 100</td></tr>
                         </tbody>
                     </table>
+
+                    <h3 style={h3Style}>大气传播模型说明</h3>
+                    <div style={tipStyle}>
+                        <strong>ITU-R P.676-12（气体衰减）</strong>：分别计算氧气特定衰减 γ_o 和水蒸气特定衰减 γ_w，
+                        按有效路径高度积分（h_O = 6 km，h_W = 2.1 km）。捕获 22.235 GHz 水蒸气共振峰。
+                        标准大气下，30 GHz 气体衰减约 0.20 dB（仰角 45°）。
+                    </div>
+                    <div style={tipStyle} style={{...tipStyle, marginTop: '8px'}}>
+                        <strong>ITU-R P.840-8（云/雾衰减）</strong>：双 Debye 介电模型计算液态水特定衰减系数 K_l（温度相关），
+                        柱状液水含量默认 L = 0.5 kg/m²（中纬度典型值）。
+                        30 GHz、仰角 45° 下，中等云层衰减约 0.3–0.5 dB。
+                    </div>
                 </div>
 
                 {/* 4. 信道传播仿真面板 */}
