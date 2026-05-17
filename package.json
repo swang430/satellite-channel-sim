@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "api": "node server/index.js",
+    "full": "concurrently \"npm run dev\" \"npm run api\""
   },
   "dependencies": {
     "chart.js": "^4.5.1",
@@ -17,7 +19,8 @@
     "react": "^19.2.0",
     "react-chartjs-2": "^5.3.1",
     "react-dom": "^19.2.0",
-    "satellite.js": "^6.0.2"
+    "satellite.js": "^6.0.2",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

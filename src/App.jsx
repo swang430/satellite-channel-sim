@@ -6,6 +6,7 @@ import './App.css';
 import { calculateLinkBudget, calculateMIMOCapacity, calculateDynamicOrbit, predictPasses, computeGroundTrack, computeSkyTrack, generatePassReplay, generateTrajectoryExport, extractGoldenTrajectory } from './model';
 import ChannelSimPanel from './ChannelSimPanel';
 import UserManual from './UserManual';
+import ApiDashboard from './panels/ApiDashboard';
 import { buildSimulationProjectManifest, buildTrajectoryCsv } from './projectSync';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, BarController, Title, Tooltip, Legend, ScatterController);
@@ -393,6 +394,7 @@ function App() {
   const [tleLine2, setTleLine2] = useState(ISS_TLE2);
   const [isDynamicOrbit, setIsDynamicOrbit] = useState(true);
   const [showManual, setShowManual] = useState(false);
+  const [showApiDashboard, setShowApiDashboard] = useState(false);
   const [orbitData, setOrbitData] = useState(null);
   const [passData, setPassData] = useState([]);
   const [passComputing, setPassComputing] = useState(false);
@@ -1002,6 +1004,17 @@ function App() {
             marginLeft: 0
           }}
         >📖 使用手册</button>
+        <button
+          onClick={() => setShowApiDashboard(!showApiDashboard)}
+          title="API Dashboard"
+          style={{
+            background: showApiDashboard ? 'linear-gradient(135deg, #00e5ff, #00b8d4)' : 'rgba(0, 229, 255, 0.15)',
+            border: '1px solid rgba(0, 229, 255, 0.4)',
+            color: showApiDashboard ? '#000' : 'rgba(0, 229, 255, 0.9)',
+            fontSize: '1em', padding: '6px 14px', borderRadius: '6px',
+            cursor: 'pointer', fontWeight: 'bold', boxShadow: showApiDashboard ? '0 2px 8px rgba(0,229,255,0.4)' : 'none'
+          }}
+        >🛰️ API Dashboard</button>
       </div>
 
       <div className="orbit-controls" style={{ padding: '15px', border: '1px solid rgba(78,205,196,0.5)', borderRadius: '5px', marginBottom: '20px', background: 'linear-gradient(135deg, #0a0a2e 0%, #1a1a3e 100%)', textAlign: 'left', color: '#eee' }}>
@@ -1513,6 +1526,7 @@ function App() {
 
       {/* === 使用手册浮层 === */}
       {showManual && <UserManual onClose={() => setShowManual(false)} />}
+      {showApiDashboard && <ApiDashboard />}
 
     </div>
   );
