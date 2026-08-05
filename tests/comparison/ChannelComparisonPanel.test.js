@@ -187,5 +187,22 @@ describe('ChannelComparisonPanel', () => {
 
     expect(signal.aborted).toBe(true);
     expect(onReportChange).toHaveBeenLastCalledWith(null);
+    expect([...container.querySelectorAll('button')]
+      .some((button) => button.textContent === '取消')).toBe(false);
+    expect(container.querySelector('button').disabled).toBe(false);
+  });
+
+  it('shows a parameter error and disables comparison when request derivation failed', () => {
+    render({
+      requestKey: 'request-must-not-run',
+      parameterError: {
+        code: 'STATISTICAL_CIR_INPUT_INVALID',
+        message: 'tec_TECU must be finite',
+      },
+    });
+
+    expect(container.querySelector('button').disabled).toBe(true);
+    expect(container.querySelector('[role="alert"]').textContent)
+      .toContain('tec_TECU must be finite');
   });
 });

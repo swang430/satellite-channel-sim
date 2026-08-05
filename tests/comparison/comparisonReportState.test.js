@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   buildComparisonRequestKey,
   currentComparisonReport,
+  deriveComparisonRequest,
+  normalizeComparisonEnvironment,
 } from '../../src/features/channel-comparison/comparisonReportState.js';
 
 function comparisonRequest(overrides = {}) {
@@ -18,6 +20,87 @@ function comparisonRequest(overrides = {}) {
 }
 
 describe('comparison report request state', () => {
+  it.each(['rural', 'suburban', 'urban', 'maritime'])('preserves supported environment %s', (environment) => {
+    expect(normalizeComparisonEnvironment(environment)).toBe(environment);
+  });
+
+  it('maps the UI open environment to the statistical rural model', () => {
+    const request = deriveComparisonRequest({
+      scenarioId: 'sha256:scenario-a',
+      environment: 'open',
+      tec_TECU: 20,
+    });
+
+    expect(request.error).toBeNull();
+    expect(request.statisticalParameters).toEqual({
+      environment: 'rural',
+      tec_TECU: 20,
+      scatterPowerOffset_dB: 0,
+    });
+    expect(request.requestKey).toBe(buildComparisonRequestKey({
+      scenarioId: 'sha256:scenario-a',
+      realizationCount: 32,
+      statisticalParameters: request.statisticalParameters,
+    }));
+  });
+
+  it.each([
+    ['invalid TEC', { environment: 'open', tec_TECU: Number.NaN }, 'STATISTICAL_CIR_INPUT_INVALID'],
+    ['unknown environment', { environment: 'forest', tec_TECU: 20 }, 'COMPARISON_ENVIRONMENT_INVALID'],
+  ])('returns a safe structured error for %s without throwing', (_label, input, code) => {
+    expect(() => deriveComparisonRequest({
+      scenarioId: 'sha256:scenario-a',
+      ...input,
+    })).not.toThrow();
+    expect(deriveComparisonRequest({
+      scenarioId: 'sha256:scenario-a',
+      ...input,
+    })).toMatchObject({
+      requestKey: null,
+      statisticalParameters: null,
+      error: { code },
+    });
+  });
+
+  it('does not report parameter errors before a scenario exists', () => {
+    expect(deriveComparisonRequest({
+      scenarioId: null,
+      environment: 'forest',
+      tec_TECU: Number.NaN,
+    })).toEqual({
+      requestKey: null,
+      statisticalParameters: null,
+      error: null,
+    });
+  });
+
+  it('uses only a finite calibrated scatter offset and ignores unrelated profile fields', () => {
+    expect(deriveComparisonRequest({
+      scenarioId: 'sha256:scenario-a',
+      environment: 'open',
+      tec_TECU: 20,
+      useCalibration: true,
+      calibrationProfile: {
+        calibrated: true,
+        environment: 'forest',
+        params: { scatterPowerOffset_dB: -3 },
+      },
+    }).statisticalParameters).toMatchObject({
+      environment: 'rural',
+      scatterPowerOffset_dB: -3,
+    });
+    expect(deriveComparisonRequest({
+      scenarioId: 'sha256:scenario-a',
+      environment: 'urban',
+      tec_TECU: 20,
+      useCalibration: true,
+      calibrationProfile: {
+        calibrated: true,
+        params: { scatterPowerOffset_dB: Number.NaN },
+      },
+    }).statisticalParameters.scatterPowerOffset_dB).toBe(0);
+  });
+
   it('accepts only the report for the current scenario and request key', () => {
     const report = { scenarioId: 'a', requestKey: 'request-a' };
 

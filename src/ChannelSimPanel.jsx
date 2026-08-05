@@ -13,9 +13,8 @@ import {
 } from './calibration/storage.js';
 import PdpComparisonPlayer from './features/channel-comparison/PdpComparisonPlayer.jsx';
 import {
-    buildComparisonRequestKey,
-    COMPARISON_REALIZATION_COUNT,
     currentComparisonReport,
+    deriveComparisonRequest,
 } from './features/channel-comparison/comparisonReportState.js';
 
 const MpdbImportPanel = lazy(() => import('./features/mpdb-import/MpdbImportPanel.jsx'));
@@ -92,27 +91,15 @@ export default function ChannelSimPanel({
     const [comparisonReport, setComparisonReport] = useState(null);
     const [showMpdbTools, setShowMpdbTools] = useState(false);
     const timeline = generatedTimeline;
-    const statisticalParameters = useMemo(() => {
-        const calibratedScatterOffset = calibProfile?.params?.scatterPowerOffset_dB;
-        return {
-            environment: env,
-            tec_TECU: tec,
-            scatterPowerOffset_dB: useCalibration
-                && calibProfile?.calibrated
-                && Number.isFinite(calibratedScatterOffset)
-                ? calibratedScatterOffset
-                : 0,
-        };
-    }, [calibProfile?.calibrated, calibProfile?.params?.scatterPowerOffset_dB, env, tec, useCalibration]);
-    const comparisonRequestKey = useMemo(() => (
-        typeof mpdbScenario?.scenarioId === 'string' && mpdbScenario.scenarioId.length > 0
-            ? buildComparisonRequestKey({
-                scenarioId: mpdbScenario.scenarioId,
-                statisticalParameters,
-                realizationCount: COMPARISON_REALIZATION_COUNT,
-            })
-            : null
-    ), [mpdbScenario?.scenarioId, statisticalParameters]);
+    const comparisonRequest = useMemo(() => deriveComparisonRequest({
+        scenarioId: mpdbScenario?.scenarioId,
+        environment: env,
+        tec_TECU: tec,
+        useCalibration,
+        calibrationProfile: calibProfile,
+    }), [calibProfile, env, mpdbScenario?.scenarioId, tec, useCalibration]);
+    const statisticalParameters = comparisonRequest.statisticalParameters;
+    const comparisonRequestKey = comparisonRequest.requestKey;
     const activeComparisonReport = currentComparisonReport(
         comparisonReport,
         mpdbScenario?.scenarioId,
@@ -125,6 +112,10 @@ export default function ChannelSimPanel({
     const [statusMsg, setStatusMsg] = useState('');
     const [isCirPlaying, setIsCirPlaying] = useState(false);
     const [cirFps, setCirFps] = useState(1);
+    const handleComparisonReportChange = useCallback((nextReport) => {
+        setComparisonReport(nextReport);
+        if (nextReport) setIsCirPlaying(false);
+    }, []);
 
     // === Pass Search State ===
     const [passes, setPasses] = useState([]);
@@ -286,7 +277,7 @@ export default function ChannelSimPanel({
 
     // === CIR playback ===
     useEffect(() => {
-        if (!isCirPlaying || timeline.length === 0) return;
+        if (activeComparisonReport || !isCirPlaying || timeline.length === 0) return;
         const intervalMs = Math.max(20, Math.round(1000 / Math.max(1, cirFps)));
         const timer = setInterval(() => {
             setCirIdx(prev => {
@@ -296,7 +287,7 @@ export default function ChannelSimPanel({
             });
         }, intervalMs);
         return () => clearInterval(timer);
-    }, [isCirPlaying, cirFps, timeline.length]);
+    }, [activeComparisonReport, isCirPlaying, cirFps, timeline.length]);
 
     const prevRequestedIdxRef = useRef(requestedCirIndex);
     useEffect(() => {
@@ -748,6 +739,7 @@ export default function ChannelSimPanel({
                         <strong style={{ fontSize: '0.9em' }} title="Based on 3GPP TR 38.811 & ITU-R Models">{'\u2699\ufe0f'} Channel Engine <span style={{ fontSize: '0.8em', color: '#888', fontWeight: 'normal' }}>(3GPP TR 38.811 / ITU-R)</span></strong>
                         <label style={labelStyle}>Env:
                             <select value={env} onChange={e => onLinkParamsChange?.({ env: e.target.value })} style={selectStyle}>
+                                <option value="open">open (rural)</option>
                                 <option value="suburban">suburban</option>
                                 <option value="urban">urban</option>
                                 <option value="rural">rural</option>
@@ -1236,7 +1228,8 @@ export default function ChannelSimPanel({
                             scenario={mpdbScenario}
                             requestKey={comparisonRequestKey}
                             statisticalParameters={statisticalParameters}
-                            onReportChange={setComparisonReport}
+                            parameterError={comparisonRequest.error}
+                            onReportChange={handleComparisonReportChange}
                         />
                     )}
                 </Suspense>

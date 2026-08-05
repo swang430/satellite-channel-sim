@@ -11,8 +11,9 @@ const panelStyle = {
   borderRadius: '8px',
 };
 
-function scenarioCanRun(scenario, requestKey) {
+function scenarioCanRun(scenario, requestKey, parameterError) {
   return Boolean(scenario)
+    && !parameterError
     && typeof requestKey === 'string'
     && requestKey.length > 0
     && validateScenario(scenario).length === 0;
@@ -22,6 +23,7 @@ export default function ChannelComparisonPanel({
   scenario,
   requestKey,
   statisticalParameters,
+  parameterError,
   onReportChange,
 }) {
   const [summaryReport, setSummaryReport] = useState(null);
@@ -98,7 +100,7 @@ export default function ChannelComparisonPanel({
   }
 
   if (!scenario) return null;
-  const enabled = scenarioCanRun(scenario, requestKey);
+  const enabled = scenarioCanRun(scenario, requestKey, parameterError);
   return (
     <section style={panelStyle} aria-label="RT / 统计信道对比计算">
       <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -128,7 +130,13 @@ export default function ChannelComparisonPanel({
       <div style={{ marginTop: '7px', color: '#d6aa6c', fontSize: '0.76em' }}>
         相对 PDP 对比；RT 绝对功率不可用（UNDEFINED_H_NORMALIZATION）。
       </div>
-      {error && <div role="alert" style={{ color: '#ff9e9e', marginTop: '8px' }}>{error}</div>}
+      {(parameterError || error) && (
+        <div role="alert" style={{ color: '#ff9e9e', marginTop: '8px' }}>
+          {parameterError
+            ? `比较参数无效（${parameterError.code}）：${parameterError.message}`
+            : error}
+        </div>
+      )}
       {summaryReport && (
         <div style={{ display: 'flex', gap: '10px', marginTop: '12px', flexWrap: 'wrap', fontFamily: 'monospace', fontSize: '0.78em' }}>
           <span>total {summaryReport.frameCounts.total}</span>
