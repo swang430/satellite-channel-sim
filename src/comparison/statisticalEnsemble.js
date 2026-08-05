@@ -1,4 +1,5 @@
 import { computeStatisticalCir } from '../channel/statisticalCir.js';
+import { DomainValidationError } from '../domain/validation.js';
 import { createDeterministicRng, seedForRealization } from './deterministicRng.js';
 
 function quantile(sorted, probability) {
@@ -17,8 +18,15 @@ export function runStatisticalEnsemble({
   carrier,
   environment = 'suburban',
   tec_TECU = 50,
+  scatterPowerOffset_dB = 0,
   realizationCount = 32,
 }) {
+  if (!Number.isFinite(scatterPowerOffset_dB)) {
+    throw new DomainValidationError(
+      'STATISTICAL_CIR_INPUT_INVALID',
+      'scatterPowerOffset_dB must be finite',
+    );
+  }
   const realizations = [];
   const binIndices = new Set();
   for (let realizationId = 0; realizationId < realizationCount; realizationId += 1) {
@@ -31,6 +39,7 @@ export function runStatisticalEnsemble({
       elevation_deg: geometry.elevation_deg,
       environment,
       tec_TECU,
+      scatterPowerOffset_dB,
       simTime_s: rng() * 10_000,
     });
     const powers = new Map();
@@ -59,4 +68,3 @@ export function runStatisticalEnsemble({
     realizations,
   };
 }
-

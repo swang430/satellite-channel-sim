@@ -18,7 +18,7 @@ describe('shared link geometry', () => {
     expect(position.z).toBeCloseTo(0, 9);
   });
 
-  it('uses scenario coordinates and the user-selected static point without SGP4', () => {
+  it('uses scenario transmitter and receiver coordinates without SGP4', () => {
     const scenario = {
       time: { frameCount: 2 },
       transmitter: {
@@ -27,10 +27,11 @@ describe('shared link geometry', () => {
           { timestampUtc: '2026-08-05T00:00:01.000Z', projectedPosition_m: { x: 1_000, y: 0, z: 1_000 } },
         ],
       },
-      groundSelection: {
-        selectedFrameId: 0,
-        selectedBy: 'user',
-        projectedPosition_m: { x: 0, y: 0, z: 0 },
+      receiver: {
+        track: [
+          { frameId: 0, projectedPosition_m: { x: 0, y: 0, z: 0 } },
+          { frameId: 1, projectedPosition_m: { x: 0, y: 0, z: 0 } },
+        ],
       },
     };
 

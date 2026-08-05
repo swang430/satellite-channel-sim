@@ -1,24 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { classifyScenarioFrames } from '../../src/comparison/frameAlignment.js';
 import {
   comparePdpMetrics,
   summarizeRtPathStatistics,
 } from '../../src/comparison/comparisonMetrics.js';
 
 describe('comparison alignment and metrics', () => {
-  it('classifies exact and approximate frames using the user tolerance', () => {
-    const result = classifyScenarioFrames({
-      groundSelection: { matchTolerance_m: 0.1 },
-      groundCandidates: [
-        { frameId: 0, groundPositionMismatch_m: 0 },
-        { frameId: 1, groundPositionMismatch_m: 0.25 },
-      ],
-    });
-
-    expect(result.exact.map((item) => item.frameId)).toEqual([0]);
-    expect(result.approximate.map((item) => item.frameId)).toEqual([1]);
-  });
-
   it('computes hand-checkable PDP divergence and weighted delay distance', () => {
     const first = {
       binWidth_s: 10e-9,
@@ -57,4 +43,3 @@ describe('comparison alignment and metrics', () => {
     expect(statistics).not.toHaveProperty('channelTypeLabels');
   });
 });
-

@@ -32,5 +32,16 @@ describe('deterministic statistical ensemble', () => {
     expect(ensemble.summary.p5[0]).toBeLessThanOrEqual(ensemble.summary.median[0]);
     expect(ensemble.summary.median[0]).toBeLessThanOrEqual(ensemble.summary.p95[0]);
   });
-});
 
+  it('rejects a non-finite scatter power offset before generating realizations', () => {
+    expect(() => runStatisticalEnsemble({
+      scenarioId: 'sha256:abc',
+      frameId: 0,
+      geometry: { slantRange_m: 700_000, elevation_deg: 30 },
+      carrier: { frequency_Hz: 25e9, bandwidth_Hz: 100e6 },
+      environment: 'urban',
+      scatterPowerOffset_dB: Number.NaN,
+      realizationCount: 1,
+    })).toThrowError(expect.objectContaining({ code: 'STATISTICAL_CIR_INPUT_INVALID' }));
+  });
+});
