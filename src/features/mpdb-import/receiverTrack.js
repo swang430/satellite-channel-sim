@@ -48,10 +48,13 @@ function isWithinStationaryThreshold(displacement_m, left, right, stationaryThre
   );
   // Subtracting projected coordinates loses precision in proportion to their magnitude.
   // Cap that machine-error allowance well below a meaningful millimetre-scale movement.
-  const comparisonTolerance_m = Math.min(
-    MAX_FLOAT_COMPARISON_TOLERANCE_M,
-    Number.EPSILON * coordinateScale_m * 8,
-  );
+  // A zero threshold stays exact: every representable non-zero displacement is motion.
+  const comparisonTolerance_m = stationaryThreshold_m === 0
+    ? 0
+    : Math.min(
+      MAX_FLOAT_COMPARISON_TOLERANCE_M,
+      Number.EPSILON * coordinateScale_m * 8,
+    );
   return displacement_m <= stationaryThreshold_m + comparisonTolerance_m;
 }
 

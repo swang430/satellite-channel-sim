@@ -90,6 +90,18 @@ describe('MPDB receiver track motion', () => {
     });
   });
 
+  it('keeps a zero threshold strict at large projected coordinates', () => {
+    const track = twoPointTrack(1_000_000, 1_000_000 + 1e-9);
+    const motion = receiverMotionAt(track, 1, { stationaryThreshold_m: 0 });
+
+    expect(motion.displacement_m).toBeGreaterThan(0);
+    expect(motion.state).toBe('moving');
+    expect(summarizeReceiverTrack(track, { stationaryThreshold_m: 0 })).toMatchObject({
+      movingFrameCount: 1,
+      stationaryFrameCount: 0,
+    });
+  });
+
   it.each([
     [null, 0],
     [[], 0],
