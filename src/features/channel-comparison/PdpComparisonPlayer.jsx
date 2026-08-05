@@ -228,7 +228,12 @@ export default function PdpComparisonPlayer({ report }) {
       </div>
 
       <div style={{ height: '330px' }}>
-        <Line data={chartData} options={CHART_OPTIONS} />
+        <Line
+          data={chartData}
+          options={CHART_OPTIONS}
+          role="img"
+          aria-label={`PDP 图表：统计中位数、P5、P95；RT PDP ${showRtOverlay ? '已显示' : '已隐藏'}`}
+        />
       </div>
     </section>
   );

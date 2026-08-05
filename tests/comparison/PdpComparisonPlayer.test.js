@@ -1,0 +1,250 @@
+// @vitest-environment happy-dom
+/* global document, window */
+
+import * as React from 'react';
+import { createRoot } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import PdpComparisonPlayer from '../../src/features/channel-comparison/PdpComparisonPlayer.jsx';
+
+const { act, createElement } = React;
+globalThis.React = React;
+
+vi.mock('react-chartjs-2', () => ({
+  Line: ({ data, role, 'aria-label': ariaLabel }) => createElement('div', {
+    role,
+    'aria-label': ariaLabel,
+    'data-sources': data.datasets.map((dataset) => dataset.source).join(','),
+  }),
+}));
+
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+
+function comparisonFrameFixture({
+  frameId,
+  timestampUtc,
+  receiverX_m,
+  longitude_deg = 116.3,
+  latitude_deg = 39.9,
+} = {}) {
+  return {
+    frameId,
+    timestampUtc,
+    receiver: {
+      frameId,
+      timestampUtc,
+      longitude_deg,
+      latitude_deg,
+      altitude_m: 50,
+      projectedPosition_m: { x: receiverX_m, y: 0, z: 0 },
+      source: 'rayTracing.rxPosition',
+    },
+    geometry: {
+      frameId,
+      timestampUtc,
+      receiverPosition_m: { x: receiverX_m, y: 0, z: 0 },
+      transmitterPosition_m: { x: 2_000, y: 0, z: 700_000 },
+      elevation_deg: 89.5,
+      slantRange_m: 700_003,
+    },
+    rt: {
+      pdp: {
+        binWidth_s: 10e-9,
+        bins: [
+          { binIndex: 0, excessDelay_s: 0, relativePower_dB: 0 },
+          { binIndex: 1, excessDelay_s: 10e-9, relativePower_dB: -6 },
+        ],
+      },
+      absolutePower: { available: false, reason: 'UNDEFINED_H_NORMALIZATION' },
+    },
+    statistical: {
+      realizationCount: 32,
+      binWidth_s: 10e-9,
+      binIndices: [0, 1],
+      excessDelay_s: [0, 10e-9],
+      summary: {
+        median: [1, 0.1],
+        p5: [0.5, 0.05],
+        p95: [1, 0.2],
+      },
+    },
+    metrics: {
+      jsDivergence_bits: 0.125,
+      rmsDelaySpreadDifference_s: -2e-9,
+      weightedDelayDistance_s: 4e-9,
+    },
+  };
+}
+
+function comparisonReportFixture({ firstFrameId = 3, secondFrameId = 8 } = {}) {
+  return {
+    scenarioId: `sha256:${firstFrameId}-${secondFrameId}`,
+    modelVersion: 'mpdb-statistical-comparison/v2',
+    receiverGeometry: {
+      mode: 'mpdb-track',
+      source: 'rayTracing.rxPosition',
+      frameCount: 2,
+    },
+    diagnostics: [{
+      code: 'RT_ABSOLUTE_POWER_UNAVAILABLE',
+      severity: 'warning',
+      reason: 'UNDEFINED_H_NORMALIZATION',
+    }],
+    frames: [
+      comparisonFrameFixture({
+        frameId: firstFrameId,
+        timestampUtc: '2026-08-05T00:00:03.000Z',
+        receiverX_m: 0,
+      }),
+      comparisonFrameFixture({
+        frameId: secondFrameId,
+        timestampUtc: '2026-08-05T00:00:08.000Z',
+        receiverX_m: 1,
+        longitude_deg: 116.30001,
+        latitude_deg: 39.90001,
+      }),
+    ],
+  };
+}
+
+function chartSources(container) {
+  return container.querySelector('[role="img"]')?.dataset.sources.split(',') ?? [];
+}
+
+function click(element) {
+  act(() => element.click());
+}
+
+function advance(milliseconds) {
+  act(() => vi.advanceTimersByTime(milliseconds));
+}
+
+describe('PdpComparisonPlayer', () => {
+  let container;
+  let root;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    if (root) act(() => root.unmount());
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    container.remove();
+    vi.restoreAllMocks();
+  });
+
+  function render(report) {
+    act(() => root.render(createElement(PdpComparisonPlayer, { report })));
+  }
+
+  it('shows RT by default and keeps all statistical datasets when RT is disabled', () => {
+    render(comparisonReportFixture());
+
+    const overlay = container.querySelector('input[aria-label="RT 叠加"]');
+    expect(overlay.checked).toBe(true);
+    expect(chartSources(container)).toEqual([
+      'statistical-median',
+      'statistical-p5',
+      'statistical-p95',
+      'rt',
+    ]);
+    expect(container.querySelector('[role="img"]').getAttribute('aria-label'))
+      .toContain('RT PDP 已显示');
+
+    click(overlay);
+
+    expect(overlay.checked).toBe(false);
+    expect(chartSources(container)).toEqual([
+      'statistical-median',
+      'statistical-p5',
+      'statistical-p95',
+    ]);
+    expect(container.querySelector('[role="img"]').getAttribute('aria-label'))
+      .toContain('RT PDP 已隐藏');
+  });
+
+  it('advances non-contiguous frame IDs at the default FPS and stays still while paused', () => {
+    render(comparisonReportFixture());
+    click(container.querySelector('button[aria-label="播放 PDP 对比"]'));
+
+    advance(500);
+    expect(container.textContent).toContain('MPDB FRAME 8');
+
+    click(container.querySelector('button[aria-label="暂停 PDP 对比播放"]'));
+    advance(1_000);
+    expect(container.textContent).toContain('MPDB FRAME 8');
+  });
+
+  it('cleans the old interval and advances at the selected FPS', () => {
+    const clearIntervalSpy = vi.spyOn(window, 'clearInterval');
+    render(comparisonReportFixture());
+    click(container.querySelector('button[aria-label="播放 PDP 对比"]'));
+    advance(500);
+
+    const speed = container.querySelector('select[aria-label="播放速度"]');
+    act(() => {
+      speed.value = '5';
+      speed.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    expect(clearIntervalSpy).toHaveBeenCalled();
+    advance(199);
+    expect(container.textContent).toContain('MPDB FRAME 8');
+    advance(1);
+    expect(container.textContent).toContain('MPDB FRAME 3');
+  });
+
+  it('resets and stops for a new report or a replacement frames array', () => {
+    const report = comparisonReportFixture();
+    render(report);
+    click(container.querySelector('button[aria-label="播放 PDP 对比"]'));
+    advance(500);
+    expect(container.textContent).toContain('MPDB FRAME 8');
+
+    const replacementReport = comparisonReportFixture({
+      firstFrameId: 13,
+      secondFrameId: 18,
+    });
+    render(replacementReport);
+    expect(container.textContent).toContain('MPDB FRAME 13');
+    expect(container.querySelector('button[aria-label="播放 PDP 对比"]')).not.toBeNull();
+    advance(1_000);
+    expect(container.textContent).toContain('MPDB FRAME 13');
+
+    replacementReport.frames = comparisonReportFixture({
+      firstFrameId: 21,
+      secondFrameId: 28,
+    }).frames;
+    render(replacementReport);
+    expect(container.textContent).toContain('MPDB FRAME 21');
+    expect(container.querySelector('button[aria-label="播放 PDP 对比"]')).not.toBeNull();
+    advance(1_000);
+    expect(container.textContent).toContain('MPDB FRAME 21');
+  });
+
+  it('cleans the playback interval on unmount without leaking a state update', () => {
+    const clearIntervalSpy = vi.spyOn(window, 'clearInterval');
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(comparisonReportFixture());
+    click(container.querySelector('button[aria-label="播放 PDP 对比"]'));
+
+    act(() => root.unmount());
+    root = null;
+    advance(1_000);
+
+    expect(clearIntervalSpy).toHaveBeenCalled();
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
+  });
+
+  it('renders a structured alert for an invalid report instead of throwing', () => {
+    expect(() => render({ diagnostics: [], frames: [] })).not.toThrow();
+
+    const alert = container.querySelector('[role="alert"]');
+    expect(alert).not.toBeNull();
+    expect(alert.textContent).toContain('COMPARISON_PLOT_DATA_INVALID');
+  });
+});
