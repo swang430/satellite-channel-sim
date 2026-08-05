@@ -86,18 +86,15 @@ function buildReceiverTrack(mpdb, config, alignment) {
   return Array.from({ length: mpdb.frameCount }, (_, frameId) => {
     const localPosition_m = readFlatPosition(mpdb.linkFrames.rxPosition_m, frameId);
     const projectedPosition_m = localToProjected(localPosition_m, alignment.localOrigin_m);
-    const geographicPosition = projectedToGeographic(
-      projectedPosition_m,
-      config.coordinateReference.projectedEpsg,
-    );
     return {
       frameId,
       timestampUtc: config.timestampsUtc[frameId],
       localPosition_m,
       projectedPosition_m,
-      longitude_deg: geographicPosition.longitude_deg,
-      latitude_deg: geographicPosition.latitude_deg,
-      height_m: geographicPosition.altitude_m,
+      ...projectedToGeographic(
+        projectedPosition_m,
+        config.coordinateReference.projectedEpsg,
+      ),
     };
   });
 }

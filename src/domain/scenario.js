@@ -123,7 +123,7 @@ export function validateScenario(scenario) {
       const coordinates = [
         ['longitude_deg', point?.longitude_deg],
         ['latitude_deg', point?.latitude_deg],
-        ['height_m', point?.height_m],
+        ['altitude_m', point?.altitude_m],
         ['projectedPosition_m.x', point?.projectedPosition_m?.x],
         ['projectedPosition_m.y', point?.projectedPosition_m?.y],
         ['projectedPosition_m.z', point?.projectedPosition_m?.z],

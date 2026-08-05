@@ -11,7 +11,7 @@ function receiverTrack(frameCount = 179) {
     frameId,
     longitude_deg: 116.3 + frameId * 1e-6,
     latitude_deg: 39.9 + frameId * 1e-6,
-    height_m: 50,
+    altitude_m: 50,
     projectedPosition_m: {
       x: 360_000 + frameId,
       y: 3_980_000 + frameId,
@@ -122,7 +122,7 @@ describe('UnifiedScenario v3', () => {
   it.each([
     ['longitude_deg', Number.NaN, 'receiver.track[0].longitude_deg'],
     ['latitude_deg', Number.POSITIVE_INFINITY, 'receiver.track[0].latitude_deg'],
-    ['height_m', undefined, 'receiver.track[0].height_m'],
+    ['altitude_m', undefined, 'receiver.track[0].altitude_m'],
     ['projectedPosition_m.x', Number.NaN, 'receiver.track[0].projectedPosition_m.x'],
     ['projectedPosition_m.y', Number.POSITIVE_INFINITY, 'receiver.track[0].projectedPosition_m.y'],
     ['projectedPosition_m.z', undefined, 'receiver.track[0].projectedPosition_m.z'],
