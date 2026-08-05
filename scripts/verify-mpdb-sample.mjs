@@ -7,6 +7,7 @@ import {
   assertDynamicComparisonReport,
   assertExpectedMpdbSample,
   buildMismatchedConfigFiles,
+  MPDB_SAMPLE_COMPARISON_OPTIONS,
   renameSampleFiles,
 } from './mpdbSampleVerification.js';
 
@@ -23,7 +24,7 @@ if (paths.length !== 3) {
   assertExpectedMpdbSample(scenario);
 
   const comparisonStartedAt_ms = performance.now();
-  const comparisonReport = await compareScenario(scenario);
+  const comparisonReport = await compareScenario(scenario, MPDB_SAMPLE_COMPARISON_OPTIONS);
   const comparisonElapsed_ms = performance.now() - comparisonStartedAt_ms;
   assertDynamicComparisonReport(comparisonReport, scenario.time.frameCount);
   const receiverTrackSummary = summarizeReceiverTrack(scenario.receiver.track);
@@ -63,6 +64,8 @@ if (paths.length !== 3) {
       receiverGeometryMode: comparisonReport.receiverGeometry.mode,
       comparedFrameCount: comparisonReport.frameCounts.compared,
       realizationCount: comparisonReport.realizationCount,
+      modelVersion: comparisonReport.modelVersion,
+      statisticalParameters: comparisonReport.statisticalParameters,
       initialFrameCount: receiverTrackSummary.frameCount > 0 ? 1 : 0,
       movingFrameCount: receiverTrackSummary.movingFrameCount,
       stationaryFrameCount: receiverTrackSummary.stationaryFrameCount,

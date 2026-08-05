@@ -1,5 +1,15 @@
 const decoder = new TextDecoder('utf-8', { fatal: true });
 const encoder = new TextEncoder();
+const MPDB_SAMPLE_COMPARISON_MODEL_VERSION = 'mpdb-statistical-comparison/v2';
+
+export const MPDB_SAMPLE_COMPARISON_OPTIONS = Object.freeze({
+  realizationCount: 32,
+  statisticalParameters: Object.freeze({
+    environment: 'suburban',
+    tec_TECU: 50,
+    scatterPowerOffset_dB: 0,
+  }),
+});
 
 function parseJsonFile(file) {
   try {
@@ -72,15 +82,55 @@ export function assertDynamicComparisonReport(report, expectedFrameCount) {
     );
   }
 
+  const expectedMetadata = [
+    ['modelVersion', report?.modelVersion, MPDB_SAMPLE_COMPARISON_MODEL_VERSION],
+    ['receiverGeometry.mode', report?.receiverGeometry?.mode, 'mpdb-track'],
+    ['receiverGeometry.frameCount', report?.receiverGeometry?.frameCount, expectedFrameCount],
+    ['realizationCount', report?.realizationCount, MPDB_SAMPLE_COMPARISON_OPTIONS.realizationCount],
+    ['frameCounts.total', report?.frameCounts?.total, expectedFrameCount],
+    ['frameCounts.compared', report?.frameCounts?.compared, expectedFrameCount],
+    [
+      'statisticalParameters.environment',
+      report?.statisticalParameters?.environment,
+      MPDB_SAMPLE_COMPARISON_OPTIONS.statisticalParameters.environment,
+    ],
+    [
+      'statisticalParameters.tec_TECU',
+      report?.statisticalParameters?.tec_TECU,
+      MPDB_SAMPLE_COMPARISON_OPTIONS.statisticalParameters.tec_TECU,
+    ],
+    [
+      'statisticalParameters.scatterPowerOffset_dB',
+      report?.statisticalParameters?.scatterPowerOffset_dB,
+      MPDB_SAMPLE_COMPARISON_OPTIONS.statisticalParameters.scatterPowerOffset_dB,
+    ],
+  ];
+  for (const [path, actual, expected] of expectedMetadata) {
+    if (actual !== expected) {
+      throw new Error(`MPDB 动态比较验收失败: ${path}=${actual}, expected ${expected}`);
+    }
+  }
+
   const metricNames = [
     'jsDivergence_bits',
     'weightedDelayDistance_s',
     'rmsDelaySpreadDifference_s',
   ];
-  frames.forEach((frame, frameIndex) => {
-    if (frame?.frameId !== frameIndex) {
+  for (let frameIndex = 0; frameIndex < frames.length; frameIndex += 1) {
+    if (!(frameIndex in frames)) {
       throw new Error(
-        `MPDB 动态比较验收失败: frame[${frameIndex}].frameId=${frame?.frameId}, expected ${frameIndex}`,
+        `MPDB 动态比较验收失败: frame[${frameIndex}]=<empty>, expected object`,
+      );
+    }
+    const frame = frames[frameIndex];
+    if (frame === null || typeof frame !== 'object' || Array.isArray(frame)) {
+      throw new Error(
+        `MPDB 动态比较验收失败: frame[${frameIndex}]=${String(frame)}, expected object`,
+      );
+    }
+    if (frame.frameId !== frameIndex) {
+      throw new Error(
+        `MPDB 动态比较验收失败: frame[${frameIndex}].frameId=${frame.frameId}, expected ${frameIndex}`,
       );
     }
     for (const metricName of metricNames) {
@@ -91,5 +141,5 @@ export function assertDynamicComparisonReport(report, expectedFrameCount) {
         );
       }
     }
-  });
+  }
 }

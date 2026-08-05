@@ -3,6 +3,7 @@ import {
   assertDynamicComparisonReport,
   assertExpectedMpdbSample,
   buildMismatchedConfigFiles,
+  MPDB_SAMPLE_COMPARISON_OPTIONS,
   renameSampleFiles,
 } from '../../scripts/mpdbSampleVerification.js';
 
@@ -28,6 +29,27 @@ function dynamicComparisonFrames(frameCount = 179) {
       rmsDelaySpreadDifference_s: -3e-9,
     },
   }));
+}
+
+function dynamicComparisonReport(frameCount = 179) {
+  return {
+    modelVersion: 'mpdb-statistical-comparison/v2',
+    realizationCount: 32,
+    receiverGeometry: {
+      mode: 'mpdb-track',
+      frameCount,
+    },
+    frameCounts: {
+      total: frameCount,
+      compared: frameCount,
+    },
+    statisticalParameters: {
+      environment: 'suburban',
+      tec_TECU: 50,
+      scatterPowerOffset_dB: 0,
+    },
+    frames: dynamicComparisonFrames(frameCount),
+  };
 }
 
 describe('MPDB sample acceptance helpers', () => {
@@ -64,22 +86,33 @@ describe('MPDB sample acceptance helpers', () => {
   });
 
   it('accepts a complete dynamic comparison report with finite fit metrics', () => {
-    expect(() => assertDynamicComparisonReport({
-      frames: dynamicComparisonFrames(),
-    }, 179)).not.toThrow();
+    expect(() => assertDynamicComparisonReport(dynamicComparisonReport(), 179)).not.toThrow();
+  });
+
+  it('exports fixed real-sample comparison parameters', () => {
+    expect(MPDB_SAMPLE_COMPARISON_OPTIONS).toEqual({
+      realizationCount: 32,
+      statisticalParameters: {
+        environment: 'suburban',
+        tec_TECU: 50,
+        scatterPowerOffset_dB: 0,
+      },
+    });
   });
 
   it('rejects the wrong dynamic comparison frame count', () => {
-    expect(() => assertDynamicComparisonReport({
-      frames: dynamicComparisonFrames(178),
-    }, 179)).toThrow(/frames\.length=178, expected 179/);
+    expect(() => assertDynamicComparisonReport(dynamicComparisonReport(178), 179))
+      .toThrow(/frames\.length=178, expected 179/);
   });
 
   it('rejects a discontinuous dynamic comparison frame ID', () => {
     const frames = dynamicComparisonFrames();
     frames[4].frameId = 5;
 
-    expect(() => assertDynamicComparisonReport({ frames }, 179))
+    expect(() => assertDynamicComparisonReport({
+      ...dynamicComparisonReport(),
+      frames,
+    }, 179))
       .toThrow(/frame\[4\]\.frameId=5, expected 4/);
   });
 
@@ -91,7 +124,55 @@ describe('MPDB sample acceptance helpers', () => {
     const frames = dynamicComparisonFrames();
     frames[4].metrics[metricName] = value;
 
-    expect(() => assertDynamicComparisonReport({ frames }, 179))
+    expect(() => assertDynamicComparisonReport({
+      ...dynamicComparisonReport(),
+      frames,
+    }, 179))
       .toThrow(new RegExp(`frame\\[4\\]\\.metrics\\.${metricName}`));
+  });
+
+  it.each([
+    ['receiver geometry mode', 'receiverGeometry.mode', (report) => { report.receiverGeometry.mode = 'fixed'; }],
+    ['receiver geometry frame count', 'receiverGeometry.frameCount', (report) => { report.receiverGeometry.frameCount = 178; }],
+    ['realization count', 'realizationCount', (report) => { report.realizationCount = 16; }],
+    ['total frame count', 'frameCounts.total', (report) => { report.frameCounts.total = 178; }],
+    ['compared frame count', 'frameCounts.compared', (report) => { report.frameCounts.compared = 178; }],
+    ['environment', 'statisticalParameters.environment', (report) => { report.statisticalParameters.environment = 'urban'; }],
+    ['TEC', 'statisticalParameters.tec_TECU', (report) => { report.statisticalParameters.tec_TECU = 51; }],
+    ['scatter offset', 'statisticalParameters.scatterPowerOffset_dB', (report) => { report.statisticalParameters.scatterPowerOffset_dB = -1; }],
+    ['model version', 'modelVersion', (report) => { report.modelVersion = 'mpdb-statistical-comparison/v1'; }],
+  ])('rejects mismatched %s metadata', (_label, path, mutate) => {
+    const report = dynamicComparisonReport();
+    mutate(report);
+
+    expect(() => assertDynamicComparisonReport(report, 179))
+      .toThrow(new RegExp(path.replaceAll('.', '\\.')));
+  });
+
+  it('rejects a fully sparse frame array at its first hole', () => {
+    const report = dynamicComparisonReport();
+    report.frames = new Array(179);
+
+    expect(() => assertDynamicComparisonReport(report, 179))
+      .toThrow(/frame\[0\]/);
+  });
+
+  it('rejects a single sparse frame hole at its array position', () => {
+    const report = dynamicComparisonReport();
+    delete report.frames[4];
+
+    expect(() => assertDynamicComparisonReport(report, 179))
+      .toThrow(/frame\[4\]/);
+  });
+
+  it.each([
+    [null, 'null'],
+    [42, '42'],
+  ])('rejects a non-object frame entry %s', (frame, displayedValue) => {
+    const report = dynamicComparisonReport();
+    report.frames[4] = frame;
+
+    expect(() => assertDynamicComparisonReport(report, 179))
+      .toThrow(new RegExp(`frame\\[4\\]=${displayedValue}, expected object`));
   });
 });
