@@ -123,6 +123,10 @@ export async function buildMpdbFixture({
   linkIds = [0, 0, 1],
   omitColumn = null,
   corruptStorageKey = null,
+  transmitterId = '47641',
+  receiverId = 'terminal-route-1785827004804',
+  frequencies_Hz = [24_950_000_000, 24_950_000_000],
+  platformMetadata = false,
 } = {}) {
   const channelColumns = {
     LINK_ID: tensor('LongStorage', '0', 3),
@@ -158,10 +162,11 @@ export async function buildMpdbFixture({
     meta: {
       mode: 'CIR',
       numFrequency: 1,
-      route_link: {
+      [platformMetadata ? 'lauraycsPlatform' : 'route_link']: {
+        ...(platformMetadata ? { version: 1, format: 'route_link' } : {}),
         direction: 'downlink',
-        transmitter: { id: '47641' },
-        receiver: { id: 'terminal-1' },
+        transmitter: { id: transmitterId },
+        receiver: { id: receiverId },
       },
     },
   };
@@ -183,9 +188,9 @@ export async function buildMpdbFixture({
     ['13', encodeLong([0, 0])],
     ['14', encodeLong([0, 0])],
     ['15', encodeLong([0, 0])],
-    ['16', encodeFloat([-900_000, -180_000, 235_000, -893_000, -175_000, 235_010])],
+    ['16', encodeFloat([-60_000, -180_000, 235_000, -53_000, -175_000, 235_010])],
     ['17', encodeFloat([-1_547, -313, -40, -1_547, -313, -40])],
-    ['18', encodeLong([24_950_000_000, 24_950_000_000])],
+    ['18', encodeLong(frequencies_Hz)],
   ]);
   if (corruptStorageKey) {
     const current = storages.get(corruptStorageKey);
@@ -198,4 +203,42 @@ export async function buildMpdbFixture({
   zip.file('archive/version', encoder.encode('3\n'));
   for (const [key, bytes] of storages) zip.file(`archive/data/${key}`, bytes);
   return zip.generateAsync({ type: 'uint8array', compression: 'STORE' });
+}
+
+function addRedundantZip64Footer(zipBytes) {
+  const eocdOffset = zipBytes.length - 22;
+  const source = new DataView(zipBytes.buffer, zipBytes.byteOffset, zipBytes.byteLength);
+  const recordCount = source.getUint16(eocdOffset + 10, true);
+  const centralDirectorySize = source.getUint32(eocdOffset + 12, true);
+  const centralDirectoryOffset = source.getUint32(eocdOffset + 16, true);
+  const footer = new Uint8Array(76);
+  const view = new DataView(footer.buffer);
+  view.setUint32(0, 0x06064b50, true);
+  view.setBigUint64(4, 44n, true);
+  view.setUint16(12, 45, true);
+  view.setUint16(14, 45, true);
+  view.setBigUint64(24, BigInt(recordCount), true);
+  view.setBigUint64(32, BigInt(recordCount), true);
+  view.setBigUint64(40, BigInt(centralDirectorySize), true);
+  view.setBigUint64(48, BigInt(centralDirectoryOffset), true);
+  view.setUint32(56, 0x07064b50, true);
+  view.setBigUint64(64, BigInt(eocdOffset), true);
+  view.setUint32(72, 1, true);
+  return new Uint8Array([
+    ...zipBytes.subarray(0, eocdOffset),
+    ...footer,
+    ...zipBytes.subarray(eocdOffset),
+  ]);
+}
+
+export async function buildOuterMpdbFixture(options = {}) {
+  let ptBytes = await buildMpdbFixture(options);
+  if (options.torchZip64) ptBytes = addRedundantZip64Footer(ptBytes);
+  const mpdbZip = new JSZip();
+  mpdbZip.file('mpdb.pt', ptBytes);
+  const mpdbBytes = await mpdbZip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
+
+  const outerZip = new JSZip();
+  outerZip.file('opaque-entry.bin', mpdbBytes);
+  return outerZip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
 }

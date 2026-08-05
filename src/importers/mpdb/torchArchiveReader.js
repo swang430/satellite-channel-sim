@@ -2,6 +2,7 @@ import JSZip from 'jszip';
 import { DomainValidationError } from '../../domain/validation.js';
 import { DEFAULT_MPDB_LIMITS } from './mpdbLimits.js';
 import { readSafePickle } from './safePickleReader.js';
+import { normalizeRedundantZip64ForJsZip } from './zipCompatibility.js';
 
 const REQUIRED_MEMBERS = [
   'archive/data.pkl',
@@ -17,7 +18,7 @@ export async function readTorchArchive(input, requestedLimits = {}) {
   const limits = { ...DEFAULT_MPDB_LIMITS, ...requestedLimits };
   let zip;
   try {
-    zip = await JSZip.loadAsync(input);
+    zip = await JSZip.loadAsync(normalizeRedundantZip64ForJsZip(input));
   } catch (error) {
     throw new DomainValidationError(
       'TORCH_ARCHIVE_INVALID',

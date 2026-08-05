@@ -1,7 +1,5 @@
 const START_TIME_MS = 1_785_778_610_000;
-const FRAME_COUNT = 179;
-
-function simulationBlock() {
+function simulationBlock(frameCount) {
   return {
     simulationType: 'sat_sim',
     globalParams: {
@@ -19,16 +17,16 @@ function simulationBlock() {
     },
     simulationWindow: {
       startTime: START_TIME_MS,
-      endTime: START_TIME_MS + (FRAME_COUNT - 1) * 1_000,
+      endTime: START_TIME_MS + (frameCount - 1) * 1_000,
     },
     satelliteUtmTracks: [{
       satelliteId: '47641',
-      points: Array.from({ length: FRAME_COUNT }, (_, frameId) => ({
+      points: Array.from({ length: frameCount }, (_, frameId) => ({
         time: START_TIME_MS + frameId * 1_000,
         lng: 100 + frameId * 0.01,
         lat: 32 + frameId * 0.01,
         x: 300_000 + frameId * 7_000,
-        y: 3_800_000 + frameId * 4_000,
+        y: 3_800_000 + frameId * 5_000,
         z: 235_000 + frameId * 10,
         epsg: 32649,
       })),
@@ -53,14 +51,14 @@ function antenna(centerFrequency) {
   };
 }
 
-export function buildLauraycsConfigFixtures() {
+export function buildLauraycsConfigFixtures({ frameCount = 179 } = {}) {
   const transmitterConfig = {
     type: 'lauraycs-simulation-node-config',
     version: 1,
     exportedAt: '2026-08-05T10:49:31.240Z',
     nodeGroup: 'baseStation',
     nodeGroupName: '卫星星历',
-    simulation: simulationBlock(),
+    simulation: simulationBlock(frameCount),
     nodes: [{
       id: '47641',
       name: 'STARLINK-2019',
@@ -79,7 +77,7 @@ export function buildLauraycsConfigFixtures() {
     exportedAt: '2026-08-05T10:49:31.229Z',
     nodeGroup: 'terminal',
     nodeGroupName: '地面终端',
-    simulation: simulationBlock(),
+    simulation: simulationBlock(frameCount),
     nodes: [{
       id: 'terminal-route-1785827004804',
       name: '终端轨迹',
