@@ -74,6 +74,7 @@ export default function MpdbImportPanel({ onScenarioChange }) {
     const requestId = globalThis.crypto.randomUUID();
     requestIdRef.current = requestId;
     setScenario(null);
+    onScenarioChangeRef.current?.(null);
     setImportState((previous) => transitionImportState(previous, { type: 'START' }));
 
     worker.addEventListener('message', ({ data }) => {

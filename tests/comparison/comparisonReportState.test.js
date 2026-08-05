@@ -27,6 +27,32 @@ describe('comparison report request state', () => {
     expect(currentComparisonReport(null, 'a', 'request-a')).toBeNull();
   });
 
+  it.each([
+    [null, 'request-a'],
+    ['', 'request-a'],
+    ['a', null],
+    ['a', ''],
+  ])('fails closed when the current scenario or request key is missing', (scenarioId, requestKey) => {
+    const report = { scenarioId, requestKey };
+
+    expect(currentComparisonReport(report, scenarioId, requestKey)).toBeNull();
+  });
+
+  it('hides an otherwise matching old report after the request changes', () => {
+    const firstRequestKey = buildComparisonRequestKey(comparisonRequest());
+    const report = { scenarioId: 'sha256:scenario-a', requestKey: firstRequestKey };
+    const nextRequestKey = buildComparisonRequestKey(comparisonRequest({
+      statisticalParameters: {
+        environment: 'urban',
+        tec_TECU: 21,
+        scatterPowerOffset_dB: -2,
+      },
+    }));
+
+    expect(currentComparisonReport(report, 'sha256:scenario-a', firstRequestKey)).toBe(report);
+    expect(currentComparisonReport(report, 'sha256:scenario-a', nextRequestKey)).toBeNull();
+  });
+
   it('builds a stable key independent of request and parameter property order', () => {
     const first = comparisonRequest();
     const reordered = {

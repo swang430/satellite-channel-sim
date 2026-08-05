@@ -1,6 +1,8 @@
 import { normalizeStatisticalEnsembleParameters } from '../../comparison/statisticalEnsemble.js';
 import { DomainValidationError } from '../../domain/validation.js';
 
+export const COMPARISON_REALIZATION_COUNT = 32;
+
 export function buildComparisonRequestKey({
   scenarioId,
   statisticalParameters = {},
@@ -29,7 +31,13 @@ export function buildComparisonRequestKey({
 }
 
 export function currentComparisonReport(report, scenarioId, requestKey) {
-  return report?.scenarioId === scenarioId && report?.requestKey === requestKey
+  const hasCurrentIdentity = typeof scenarioId === 'string'
+    && scenarioId.length > 0
+    && typeof requestKey === 'string'
+    && requestKey.length > 0;
+  return hasCurrentIdentity
+    && report?.scenarioId === scenarioId
+    && report?.requestKey === requestKey
     ? report
     : null;
 }

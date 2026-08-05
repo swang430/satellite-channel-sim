@@ -1,94 +1,143 @@
-import React, { useMemo, useRef, useState } from 'react';
-import { Line } from 'react-chartjs-2';
+import { useEffect, useRef, useState } from 'react';
 import { compareScenario } from '../../comparison/compareScenario.js';
-import { canCompareScenario } from '../mpdb-import/groundSelection.js';
-import { buildComparisonPlotData } from './comparisonViewModel.js';
+import { validateScenario } from '../../domain/scenario.js';
+import { COMPARISON_REALIZATION_COUNT } from './comparisonReportState.js';
 
-export default function ChannelComparisonPanel({ scenario }) {
-  const [report, setReport] = useState(null);
+const panelStyle = {
+  marginBottom: '15px',
+  padding: '14px',
+  background: 'rgba(8,18,29,0.92)',
+  border: '1px solid rgba(255,180,65,0.38)',
+  borderRadius: '8px',
+};
+
+function scenarioCanRun(scenario, requestKey) {
+  return Boolean(scenario)
+    && typeof requestKey === 'string'
+    && requestKey.length > 0
+    && validateScenario(scenario).length === 0;
+}
+
+export default function ChannelComparisonPanel({
+  scenario,
+  requestKey,
+  statisticalParameters,
+  onReportChange,
+}) {
+  const [summaryReport, setSummaryReport] = useState(null);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState('');
-  const [frameIndex, setFrameIndex] = useState(0);
   const abortRef = useRef(null);
-  const frame = report?.frames?.[frameIndex] ?? null;
-  const plot = useMemo(() => (frame ? buildComparisonPlotData(frame) : null), [frame]);
+  const runVersionRef = useRef(0);
+  const onReportChangeRef = useRef(onReportChange);
+  onReportChangeRef.current = onReportChange;
+
+  useEffect(() => {
+    setSummaryReport(null);
+    setRunning(false);
+    setError('');
+    setProgress(0);
+    return () => {
+      runVersionRef.current += 1;
+      abortRef.current?.abort();
+      abortRef.current = null;
+    };
+  }, [requestKey, scenario, statisticalParameters]);
+
+  function cancelComparison() {
+    if (!abortRef.current) return;
+    runVersionRef.current += 1;
+    abortRef.current.abort();
+    abortRef.current = null;
+    setRunning(false);
+    setSummaryReport(null);
+    onReportChangeRef.current?.(null);
+  }
 
   async function runComparison() {
+    abortRef.current?.abort();
     const controller = new AbortController();
+    const runVersion = runVersionRef.current + 1;
+    runVersionRef.current = runVersion;
     abortRef.current = controller;
     setRunning(true);
     setProgress(0);
     setError('');
+    setSummaryReport(null);
+    onReportChangeRef.current?.(null);
+
     try {
-      const nextReport = await compareScenario(scenario, {
+      const engineReport = await compareScenario(scenario, {
+        realizationCount: COMPARISON_REALIZATION_COUNT,
+        statisticalParameters,
         signal: controller.signal,
-        onProgress: setProgress,
+        onProgress: (nextProgress) => {
+          if (runVersionRef.current === runVersion && !controller.signal.aborted) {
+            setProgress(nextProgress);
+          }
+        },
       });
-      setReport(nextReport);
-      setFrameIndex(0);
+      if (runVersionRef.current !== runVersion || controller.signal.aborted) return;
+      const keyedReport = { ...engineReport, requestKey };
+      setSummaryReport(keyedReport);
+      onReportChangeRef.current?.(keyedReport);
     } catch (caught) {
-      if (caught.code !== 'COMPARISON_CANCELLED') setError(caught.message);
+      if (runVersionRef.current !== runVersion) return;
+      setSummaryReport(null);
+      onReportChangeRef.current?.(null);
+      if (caught?.code !== 'COMPARISON_CANCELLED') {
+        setError(caught instanceof Error ? caught.message : String(caught));
+      }
     } finally {
-      setRunning(false);
-      abortRef.current = null;
+      if (runVersionRef.current === runVersion) {
+        setRunning(false);
+        abortRef.current = null;
+      }
     }
   }
 
   if (!scenario) return null;
-  const enabled = canCompareScenario(scenario);
+  const enabled = scenarioCanRun(scenario, requestKey);
   return (
-    <section style={{ marginBottom: '15px', padding: '14px', background: 'rgba(8,18,29,0.92)', border: '1px solid rgba(255,180,65,0.38)', borderRadius: '8px' }}>
+    <section style={panelStyle} aria-label="RT / 统计信道对比计算">
       <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
         <strong style={{ color: '#ffc56d', letterSpacing: '0.04em' }}>RT / 统计信道对比</strong>
-        <button type="button" disabled={!enabled || running} onClick={runComparison} style={{ padding: '6px 12px', cursor: enabled ? 'pointer' : 'not-allowed', background: enabled ? '#674919' : '#333', border: '1px solid #b78132', borderRadius: '4px', color: '#fff' }}>
-          {running ? `计算中 ${Math.round(progress * 100)}%` : '运行 32 次确定性统计集合'}
+        <button
+          type="button"
+          disabled={!enabled || running}
+          onClick={runComparison}
+          style={{
+            padding: '6px 12px',
+            cursor: enabled && !running ? 'pointer' : 'not-allowed',
+            background: enabled ? '#674919' : '#333',
+            border: '1px solid #b78132',
+            borderRadius: '4px',
+            color: '#fff',
+          }}
+        >
+          {running
+            ? `计算中 ${Math.round(progress * 100)}%`
+            : `运行 ${COMPARISON_REALIZATION_COUNT} 次确定性统计集合`}
         </button>
-        {running && <button type="button" onClick={() => abortRef.current?.abort()}>取消</button>}
+        {running && <button type="button" onClick={cancelComparison}>取消</button>}
         <span style={{ color: enabled ? '#67e6ad' : '#ffb3b3', fontSize: '0.8em' }}>
-          {enabled ? `FRAME ${scenario.groundSelection.selectedFrameId} 已确认` : '请先确认地面帧'}
+          {enabled ? 'MPDB 接收机轨迹已就绪' : 'MPDB 场景尚未满足逐帧比较条件'}
         </span>
       </div>
       <div style={{ marginTop: '7px', color: '#d6aa6c', fontSize: '0.76em' }}>
         相对 PDP 对比；RT 绝对功率不可用（UNDEFINED_H_NORMALIZATION）。
       </div>
       {error && <div role="alert" style={{ color: '#ff9e9e', marginTop: '8px' }}>{error}</div>}
-      {report && frame && plot && (
-        <>
-          <div style={{ display: 'flex', gap: '10px', margin: '12px 0 8px', flexWrap: 'wrap', fontFamily: 'monospace', fontSize: '0.78em' }}>
-            <span>exact {report.frameCounts.exact}</span>
-            <span>approx {report.frameCounts.approximate}</span>
-            <span>compared {report.frameCounts.compared}</span>
-            <span>JS {frame.metrics.jsDivergence_bits.toFixed(4)} bit</span>
-            <span>delay distance {(frame.metrics.weightedDelayDistance_s * 1e9).toFixed(3)} ns</span>
-          </div>
-          <input type="range" min={0} max={report.frames.length - 1} value={frameIndex} onChange={(event) => setFrameIndex(Number(event.target.value))} style={{ width: '100%' }} />
-          <div style={{ height: '310px' }}>
-            <Line
-              data={{
-                datasets: [
-                  { label: 'RT relative PDP', data: plot.rt, borderColor: '#ff665f', pointRadius: 2 },
-                  { label: 'Stat median', data: plot.statisticalMedian, borderColor: '#53dfc3', pointRadius: 1 },
-                  { label: 'Stat P5', data: plot.statisticalP5, borderColor: 'rgba(83,223,195,0.35)', borderDash: [4, 4], pointRadius: 0 },
-                  { label: 'Stat P95', data: plot.statisticalP95, borderColor: 'rgba(83,223,195,0.35)', borderDash: [4, 4], pointRadius: 0 },
-                ],
-              }}
-              options={{
-                responsive: true,
-                maintainAspectRatio: false,
-                parsing: false,
-                animation: false,
-                scales: {
-                  x: { type: 'linear', title: { display: true, text: 'Excess delay (ns)', color: '#aaa' }, ticks: { color: '#aaa' } },
-                  y: { min: -80, max: 5, title: { display: true, text: 'Relative power (dB)', color: '#aaa' }, ticks: { color: '#aaa' } },
-                },
-                plugins: { legend: { labels: { color: '#ddd' } } },
-              }}
-            />
-          </div>
-        </>
+      {summaryReport && (
+        <div style={{ display: 'flex', gap: '10px', marginTop: '12px', flexWrap: 'wrap', fontFamily: 'monospace', fontSize: '0.78em' }}>
+          <span>total {summaryReport.frameCounts.total}</span>
+          <span>compared {summaryReport.frameCounts.compared}</span>
+          <span>realization {summaryReport.realizationCount}</span>
+          <span>model {summaryReport.modelVersion}</span>
+          <span>receiver mode {summaryReport.receiverGeometry.mode}</span>
+        </div>
       )}
     </section>
   );
 }
-

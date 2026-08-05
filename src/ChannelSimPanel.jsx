@@ -11,6 +11,12 @@ import {
     loadCalibrationProfile,
     saveCalibrationProfile,
 } from './calibration/storage.js';
+import PdpComparisonPlayer from './features/channel-comparison/PdpComparisonPlayer.jsx';
+import {
+    buildComparisonRequestKey,
+    COMPARISON_REALIZATION_COUNT,
+    currentComparisonReport,
+} from './features/channel-comparison/comparisonReportState.js';
 
 const MpdbImportPanel = lazy(() => import('./features/mpdb-import/MpdbImportPanel.jsx'));
 const ChannelComparisonPanel = lazy(() => import('./features/channel-comparison/ChannelComparisonPanel.jsx'));
@@ -83,8 +89,35 @@ export default function ChannelSimPanel({
     // === Output State ===
     const [generatedTimeline, setGeneratedTimeline] = useState([]);
     const [mpdbScenario, setMpdbScenario] = useState(null);
+    const [comparisonReport, setComparisonReport] = useState(null);
     const [showMpdbTools, setShowMpdbTools] = useState(false);
     const timeline = generatedTimeline;
+    const statisticalParameters = useMemo(() => {
+        const calibratedScatterOffset = calibProfile?.params?.scatterPowerOffset_dB;
+        return {
+            environment: env,
+            tec_TECU: tec,
+            scatterPowerOffset_dB: useCalibration
+                && calibProfile?.calibrated
+                && Number.isFinite(calibratedScatterOffset)
+                ? calibratedScatterOffset
+                : 0,
+        };
+    }, [calibProfile?.calibrated, calibProfile?.params?.scatterPowerOffset_dB, env, tec, useCalibration]);
+    const comparisonRequestKey = useMemo(() => (
+        typeof mpdbScenario?.scenarioId === 'string' && mpdbScenario.scenarioId.length > 0
+            ? buildComparisonRequestKey({
+                scenarioId: mpdbScenario.scenarioId,
+                statisticalParameters,
+                realizationCount: COMPARISON_REALIZATION_COUNT,
+            })
+            : null
+    ), [mpdbScenario?.scenarioId, statisticalParameters]);
+    const activeComparisonReport = currentComparisonReport(
+        comparisonReport,
+        mpdbScenario?.scenarioId,
+        comparisonRequestKey,
+    );
     
     const [generatedTrajectorySamples, setGeneratedTrajectorySamples] = useState([]);
     const [computing, setComputing] = useState(false);
@@ -226,16 +259,8 @@ export default function ChannelSimPanel({
 
     const handleMpdbScenarioChange = useCallback((scenario) => {
         setMpdbScenario(scenario);
-        const selected = scenario.groundSelection?.groundPosition;
-        if (selected) {
-            const nextGroundStation = {
-                lat: selected.latitude_deg,
-                lon: selected.longitude_deg,
-                alt: selected.altitude_m
-            };
-            onGroundStationChange?.(nextGroundStation);
-        }
-    }, [onGroundStationChange]);
+        setComparisonReport(null);
+    }, []);
 
     function formatFrameTimeLabel(value, fallback = '') {
         if (!value) return fallback;
@@ -297,7 +322,7 @@ export default function ChannelSimPanel({
             importInfo: mpdbScenario ? {
                 format: mpdbScenario.source.format,
                 scenarioId: mpdbScenario.scenarioId,
-                selectedFrameId: mpdbScenario.groundSelection?.selectedFrameId ?? null
+                receiverGeometryMode: 'mpdb-track'
             } : null,
             tleLine1,
             tleLine2,
@@ -318,7 +343,7 @@ export default function ChannelSimPanel({
 
     // === CIR Canvas ===
     useEffect(() => {
-        if (!cirCanvasRef.current || timeline.length === 0) return;
+        if (activeComparisonReport || !cirCanvasRef.current || timeline.length === 0) return;
         const canvas = cirCanvasRef.current;
         const ctx = canvas.getContext('2d');
         const W = canvas.width, H = canvas.height;
@@ -462,7 +487,7 @@ export default function ChannelSimPanel({
         ctx.fillStyle = dopHz >= 0 ? '#7ecfff' : '#ffb347';
         ctx.fillText('Doppler: ' + dopSign + dopKHz.toFixed(2) + ' kHz (' + (dopHz >= 0 ? 'approaching ↑▲' : 'receding ↓▼') + ')', W - padR, 43);
 
-    }, [timeline, cirIdx]);
+    }, [activeComparisonReport, timeline, cirIdx]);
 
     // === CSV Export ===
     function exportCSV() {
@@ -557,7 +582,8 @@ export default function ChannelSimPanel({
     }
 
     // === Chart Data ===
-    const showAnalyticsPanels = timeline.length > 0;
+    const hasChannelOutput = timeline.length > 0 || Boolean(activeComparisonReport);
+    const showAnalyticsPanels = timeline.length > 0 && !activeComparisonReport;
     const chartLabels = useMemo(() => timeline.map(f => f.timeLabel), [timeline]);
 
     const rxSnrChartData = useMemo(() => ({
@@ -1206,21 +1232,24 @@ export default function ChannelSimPanel({
                     </div>
                     {mpdbScenario && (
                         <ChannelComparisonPanel
-                            key={`${mpdbScenario.scenarioId}-${mpdbScenario.comparisonRevision ?? 0}`}
+                            key={comparisonRequestKey}
                             scenario={mpdbScenario}
+                            requestKey={comparisonRequestKey}
+                            statisticalParameters={statisticalParameters}
+                            onReportChange={setComparisonReport}
                         />
                     )}
                 </Suspense>
             )}
 
-            {timeline.length === 0 && (
+            {!hasChannelOutput && (
                 <div style={{ fontSize: '0.85em', color: '#aaa', marginBottom: '15px' }}>
-                    导入 MPDB 后选择地面帧以准备比较，或生成统计信道时间线。
+                    导入 MPDB 接收机轨迹并运行比较，或生成统计信道时间线。
                 </div>
             )}
 
             {/* === Output Area === */}
-            {timeline.length > 0 && (
+            {hasChannelOutput && (
                 <>
                     {showAnalyticsPanels && (
                         <div style={{ background: 'rgba(0,0,0,0.3)', borderRadius: '6px', padding: '12px', marginBottom: '15px' }}>
@@ -1228,6 +1257,12 @@ export default function ChannelSimPanel({
                         </div>
                     )}
 
+                    {activeComparisonReport ? (
+                        <PdpComparisonPlayer
+                            key={comparisonRequestKey}
+                            report={activeComparisonReport}
+                        />
+                    ) : (
                     <div style={{ background: 'rgba(0,0,0,0.3)', borderRadius: '6px', padding: '12px', marginBottom: showAnalyticsPanels ? '15px' : 0 }}>
                         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap' }}>
                             <strong style={{ fontSize: '0.9em' }}>CIR Frame:</strong>
@@ -1257,6 +1292,7 @@ export default function ChannelSimPanel({
                         </div>
                         <canvas ref={cirCanvasRef} width={700} height={280} style={{ width: '100%', borderRadius: '4px' }} />
                     </div>
+                    )}
 
                     {showAnalyticsPanels && (
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
