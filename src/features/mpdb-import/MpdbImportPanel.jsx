@@ -3,11 +3,7 @@ import {
   createImportState,
   transitionImportState,
 } from './importState.js';
-import {
-  canCompareScenario,
-  selectGroundFrame,
-  suggestGroundFrames,
-} from './groundSelection.js';
+import { summarizeReceiverTrack } from './receiverTrack.js';
 import { MPDB_IMPORT_REQUEST } from '../../workers/mpdbImportProtocol.js';
 
 const panelStyle = {
@@ -45,18 +41,16 @@ function formatCoordinate(value, digits = 6) {
 export default function MpdbImportPanel({ onScenarioChange }) {
   const [importState, setImportState] = useState(createImportState);
   const [scenario, setScenario] = useState(null);
-  const [draftFrameId, setDraftFrameId] = useState(0);
   const [uiError, setUiError] = useState('');
   const workerRef = useRef(null);
   const requestIdRef = useRef(null);
 
   useEffect(() => () => workerRef.current?.terminate(), []);
 
-  const suggestions = useMemo(
-    () => (scenario ? suggestGroundFrames(scenario).slice(0, 5) : []),
+  const receiverTrackSummary = useMemo(
+    () => (scenario ? summarizeReceiverTrack(scenario.receiver.track) : null),
     [scenario],
   );
-  const candidate = scenario?.groundCandidates?.[draftFrameId] ?? null;
   const busy = ['parsing', 'validating'].includes(importState.status);
 
   async function handleFiles(fileList) {
@@ -83,7 +77,6 @@ export default function MpdbImportPanel({ onScenarioChange }) {
       if (data.type === 'READY') {
         setImportState((previous) => transitionImportState(previous, data));
         setScenario(data.scenario);
-        setDraftFrameId(0);
         onScenarioChange?.(data.scenario);
         return;
       }
@@ -105,12 +98,6 @@ export default function MpdbImportPanel({ onScenarioChange }) {
       requestId,
       files: payloadFiles,
     }, payloadFiles.map((file) => file.data));
-  }
-
-  function confirmGroundFrame() {
-    const selectedScenario = selectGroundFrame(scenario, draftFrameId);
-    setScenario(selectedScenario);
-    onScenarioChange?.(selectedScenario);
   }
 
   return (
@@ -179,59 +166,46 @@ export default function MpdbImportPanel({ onScenarioChange }) {
 
           <div style={{ marginTop: '15px', borderTop: '1px solid rgba(78,205,196,0.2)', paddingTop: '12px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
-              <strong style={{ color: '#dff' }}>地面静态点：由使用者选择 MPDB RX 帧</strong>
-              <span style={{ ...chipStyle, color: canCompareScenario(scenario) ? '#66f2b2' : '#ffd479' }}>
-                {canCompareScenario(scenario)
-                  ? `已确认 · ${scenario.groundSelection.exactMatchFrameCount} 个精确匹配帧 · revision ${scenario.comparisonRevision}`
-                  : '未确认 · 禁止比较'}
+              <strong style={{ color: '#dff' }}>接收端轨迹：逐帧跟随 MPDB 原生位置</strong>
+              <span style={{ ...chipStyle, color: '#66f2b2' }}>
+                {receiverTrackSummary.frameCount} 帧 · MPDB RX position
               </span>
             </div>
 
-            <input
-              aria-label="地面帧"
-              type="range"
-              min={0}
-              max={scenario.time.frameCount - 1}
-              value={draftFrameId}
-              onChange={(event) => setDraftFrameId(Number(event.target.value))}
-              style={{ width: '100%', margin: '12px 0 7px' }}
-            />
-            {candidate && (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '6px', fontFamily: 'monospace', fontSize: '0.78em', color: '#b8cbd0' }}>
-                <span>FRAME {candidate.frameId}</span>
-                <span>{candidate.timestampUtc}</span>
-                <span>经度 {formatCoordinate(candidate.longitude_deg)}</span>
-                <span>纬度 {formatCoordinate(candidate.latitude_deg)}</span>
-                <span>高度 {formatCoordinate(candidate.altitude_m, 2)} m</span>
-                <span>偏差 {candidate.groundPositionMismatch_m == null ? '待确认' : `${formatCoordinate(candidate.groundPositionMismatch_m, 3)} m`}</span>
-              </div>
-            )}
-
-            <div style={{ marginTop: '10px', display: 'flex', gap: '7px', alignItems: 'center', flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                onClick={confirmGroundFrame}
-                style={{ padding: '6px 12px', borderRadius: '4px', border: '1px solid #4ecdc4', background: '#143f45', color: '#eaffff', cursor: 'pointer', fontWeight: 700 }}
-              >
-                确认使用 FRAME {draftFrameId}
-              </button>
-              <span style={{ color: '#78939b', fontSize: '0.76em' }}>稳定帧建议（仅定位，不自动确认）：</span>
-              {suggestions.map((suggestion) => (
-                <button
-                  key={suggestion.frameId}
-                  type="button"
-                  onClick={() => setDraftFrameId(suggestion.frameId)}
-                  style={{ ...chipStyle, cursor: 'pointer' }}
-                >
-                  F{suggestion.frameId} · {suggestion.nearbyFrameCount} 邻近帧
-                </button>
-              ))}
+            <div style={{ marginTop: '10px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '7px' }}>
+              <Metric
+                label={`起点 · FRAME ${receiverTrackSummary.start.frameId}`}
+                value={formatTrackPoint(receiverTrackSummary.start)}
+              />
+              <Metric
+                label={`终点 · FRAME ${receiverTrackSummary.end.frameId}`}
+                value={formatTrackPoint(receiverTrackSummary.end)}
+              />
+              <Metric
+                label="累计移动距离"
+                value={`${formatCoordinate(receiverTrackSummary.totalDistance_m, 2)} m`}
+              />
+              <Metric
+                label="帧间移动 / 静止"
+                value={`${receiverTrackSummary.movingFrameCount} / ${receiverTrackSummary.stationaryFrameCount}`}
+              />
+            </div>
+            <div style={{ marginTop: '7px', color: '#78939b', fontSize: '0.76em' }}>
+              状态按相邻帧位移判断（≤ 0.10 m 为静止），首帧为初始状态，不计入移动/静止数量。
             </div>
           </div>
         </>
       )}
     </section>
   );
+}
+
+function formatTrackPoint(point) {
+  return [
+    `${formatCoordinate(point.longitude_deg)}°`,
+    `${formatCoordinate(point.latitude_deg)}°`,
+    `${formatCoordinate(point.altitude_m, 2)} m`,
+  ].join(' / ');
 }
 
 function Metric({ label, value }) {
