@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildComparisonChartData,
   buildComparisonFrameView,
   buildComparisonPlaybackSummary,
   buildComparisonPlotData,
@@ -90,6 +91,51 @@ function comparisonReportFixture() {
 }
 
 describe('comparison PDP view model', () => {
+  it('maps semantic PDP datasets to stable Chart.js styles without changing their meaning', () => {
+    const view = buildComparisonFrameView(comparisonFrameFixture(), {
+      showRtOverlay: true,
+    });
+    const semanticSnapshot = structuredClone(view);
+
+    const chartData = buildComparisonChartData(view);
+    const median = chartData.datasets.find((dataset) => (
+      dataset.source === 'statistical-median'
+    ));
+    const p5 = chartData.datasets.find((dataset) => dataset.source === 'statistical-p5');
+    const p95 = chartData.datasets.find((dataset) => dataset.source === 'statistical-p95');
+    const rt = chartData.datasets.find((dataset) => dataset.source === 'rt');
+
+    expect(median).toMatchObject({
+      label: '统计中位数',
+      frameId: 3,
+      data: view.datasets[0].data,
+      borderColor: '#53dfc3',
+      showLine: true,
+      parsing: false,
+    });
+    expect(rt).toMatchObject({
+      label: 'RT PDP',
+      frameId: 3,
+      data: view.datasets[3].data,
+      borderColor: '#ff665f',
+      showLine: true,
+      parsing: false,
+    });
+    expect(rt.pointRadius).toBeGreaterThan(0);
+    for (const percentile of [p5, p95]) {
+      expect(percentile).toMatchObject({
+        frameId: 3,
+        showLine: true,
+        parsing: false,
+        borderDash: [4, 4],
+      });
+      expect(percentile.borderColor).toMatch(/^rgba\(83,\s*223,\s*195,\s*0\.[0-9]+\)$/);
+    }
+    expect(p5.label).toBe('统计 P5');
+    expect(p95.label).toBe('统计 P95');
+    expect(view).toEqual(semanticSnapshot);
+  });
+
   it('keeps the legacy RT and statistical percentile overlay series in relative dB', () => {
     const data = buildComparisonPlotData(comparisonFrameFixture());
 

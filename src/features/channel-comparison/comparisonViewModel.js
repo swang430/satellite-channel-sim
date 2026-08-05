@@ -3,6 +3,34 @@ import { receiverMotionAt } from '../mpdb-import/receiverTrack.js';
 
 const PLOT_FLOOR_DB = -120;
 const UNDEFINED_H_NORMALIZATION = 'UNDEFINED_H_NORMALIZATION';
+const CHART_DATASET_STYLES = Object.freeze({
+  'statistical-median': Object.freeze({
+    label: '统计中位数',
+    borderColor: '#53dfc3',
+    pointRadius: 1,
+    borderWidth: 2,
+  }),
+  'statistical-p5': Object.freeze({
+    label: '统计 P5',
+    borderColor: 'rgba(83, 223, 195, 0.35)',
+    pointRadius: 0,
+    borderWidth: 1,
+    borderDash: Object.freeze([4, 4]),
+  }),
+  'statistical-p95': Object.freeze({
+    label: '统计 P95',
+    borderColor: 'rgba(83, 223, 195, 0.35)',
+    pointRadius: 0,
+    borderWidth: 1,
+    borderDash: Object.freeze([4, 4]),
+  }),
+  rt: Object.freeze({
+    label: 'RT PDP',
+    borderColor: '#ff665f',
+    pointRadius: 2,
+    borderWidth: 2,
+  }),
+});
 
 function invalidComparisonData(message) {
   throw new DomainValidationError('COMPARISON_PLOT_DATA_INVALID', message);
@@ -152,6 +180,29 @@ export function buildComparisonFrameView(frame, { showRtOverlay = true } = {}) {
     datasets.push({ source: 'rt', frameId: frame.frameId, data: plot.rt });
   }
   return { frameId: frame.frameId, datasets };
+}
+
+export function buildComparisonChartData(frameView) {
+  if (!Array.isArray(frameView?.datasets)) {
+    invalidComparisonData('Comparison frame view must contain datasets');
+  }
+  return {
+    datasets: frameView.datasets.map((dataset) => {
+      const style = CHART_DATASET_STYLES[dataset?.source];
+      if (!style) {
+        invalidComparisonData(`Unsupported comparison dataset source: ${dataset?.source}`);
+      }
+      return {
+        ...dataset,
+        ...style,
+        borderDash: style.borderDash ? [...style.borderDash] : undefined,
+        showLine: true,
+        parsing: false,
+        tension: 0,
+        fill: false,
+      };
+    }),
+  };
 }
 
 export function nextComparisonPosition(report, position) {
