@@ -256,6 +256,7 @@ export function predictLinkStatePass(tle, gsLat, gsLon, gsAlt, startTime, endTim
 
 function formatLinkState(frame, mode) {
   return {
+    frameId: frame.frameIndex,
     time: frame.time instanceof Date ? frame.time.toISOString() : frame.time,
     elevation_deg: +(frame.elevation || 0).toFixed(2),
     azimuth_deg: +(frame.azimuth || 0).toFixed(2),
@@ -332,56 +333,25 @@ function summarizePass(linkStates) {
 // ─── Uncertainty Quantification ─────────────────────────────────────────
 
 /**
- * assessConfidence
- * Compares statistical model SNR against imported RT CIR SNR to quantify
- * prediction reliability.
- *
- * @param {number} statSnr - SNR from statistical model (dB)
- * @param {number} rtSnr - SNR from ray-tracing model (dB), null if unavailable
- * @returns {string} 'high' | 'medium' | 'low' | 'rt_validated' | 'statistical'
- */
-export function assessConfidence(statSnr, rtSnr = null) {
-  if (rtSnr === null || rtSnr === undefined) return 'statistical';
-  
-  const delta = Math.abs(statSnr - rtSnr);
-  if (delta < 2.0) return 'high';
-  if (delta < 5.0) return 'medium';
-  return 'low';
-}
-
-/**
  * markConfidence
- * Annotates link states with confidence levels based on RT CIR comparison
- * when available.
+ * Annotates link states from the relative-PDP comparison report. RT SNR is
+ * intentionally absent because MPDB H has no defined absolute normalization.
  */
-export function markConfidence(linkStates, rtComparisonData = null) {
-  if (!rtComparisonData) {
+export function markConfidence(linkStates, comparisonReport = null) {
+  if (!comparisonReport?.frames) {
     return linkStates.map(s => ({ ...s, confidence: 'statistical' }));
   }
-  
+  const byFrameId = new Map(comparisonReport.frames.map((frame) => [frame.frameId, frame]));
   return linkStates.map(s => {
-    // Find the closest RT data point
-    const rtMatch = findClosestRTFrame(s.time, rtComparisonData);
-    const rtSnr = rtMatch?.snrDb ?? null;
-    const confidence = assessConfidence(s.snr.db, rtSnr);
+    const frameId = s.frameId ?? s.frameIndex;
+    const comparison = byFrameId.get(frameId);
+    if (!comparison) return { ...s, confidence: 'statistical' };
     return {
       ...s,
-      confidence,
-      rtSnr_dB: rtSnr
+      confidence: 'rt-relative-pdp',
+      comparison: comparison.metrics,
     };
   });
-}
-
-function findClosestRTFrame(targetTime, rtFrames) {
-  if (!rtFrames || rtFrames.length === 0) return null;
-  const target = new Date(targetTime).getTime();
-  let best = rtFrames[0];
-  let bestDiff = Math.abs(new Date(best.time).getTime() - target);
-  for (const frame of rtFrames) {
-    const diff = Math.abs(new Date(frame.time).getTime() - target);
-    if (diff < bestDiff) { best = frame; bestDiff = diff; }
-  }
-  return best;
 }
 
 // ─── MODCOD Recommendation ──────────────────────────────────────────────

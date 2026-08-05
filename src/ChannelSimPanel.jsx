@@ -4,6 +4,7 @@ import { generateChannelTimeSeries, predictPasses, calibrateModel, applyCalibrat
 import { getSatelliteList, getSatelliteBandParams } from './knownSatellites.js';
 import { SimulationValidator } from './ValidationModule.js';
 import MpdbImportPanel from './features/mpdb-import/MpdbImportPanel.jsx';
+import ChannelComparisonPanel from './features/channel-comparison/ChannelComparisonPanel.jsx';
 
 /**
  * Channel Propagation Simulator Panel
@@ -1187,6 +1188,10 @@ export default function ChannelSimPanel({
             <div data-mpdb-scenario-id={mpdbScenario?.scenarioId ?? ''}>
                 <MpdbImportPanel onScenarioChange={handleMpdbScenarioChange} />
             </div>
+            <ChannelComparisonPanel
+                key={`${mpdbScenario?.scenarioId ?? 'none'}-${mpdbScenario?.comparisonRevision ?? 0}`}
+                scenario={mpdbScenario}
+            />
 
             {timeline.length === 0 && (
                 <div style={{ fontSize: '0.85em', color: '#aaa', marginBottom: '15px' }}>
