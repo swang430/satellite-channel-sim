@@ -1,7 +1,10 @@
 import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
+import { compareScenario } from '../src/comparison/compareScenario.js';
+import { summarizeReceiverTrack } from '../src/features/mpdb-import/receiverTrack.js';
 import { importMpdbBundle } from '../src/importers/mpdb/importMpdbBundle.js';
 import {
+  assertDynamicComparisonReport,
   assertExpectedMpdbSample,
   buildMismatchedConfigFiles,
   renameSampleFiles,
@@ -18,6 +21,12 @@ if (paths.length !== 3) {
   })));
   const scenario = await importMpdbBundle(files);
   assertExpectedMpdbSample(scenario);
+
+  const comparisonStartedAt_ms = performance.now();
+  const comparisonReport = await compareScenario(scenario);
+  const comparisonElapsed_ms = performance.now() - comparisonStartedAt_ms;
+  assertDynamicComparisonReport(comparisonReport, scenario.time.frameCount);
+  const receiverTrackSummary = summarizeReceiverTrack(scenario.receiver.track);
 
   const renamedScenario = await importMpdbBundle(renameSampleFiles(files));
   assertExpectedMpdbSample(renamedScenario);
@@ -48,9 +57,18 @@ if (paths.length !== 3) {
     bandwidth_Hz: scenario.carrier.bandwidth_Hz,
     alignmentRmsResidual_m: scenario.coordinateReference.alignmentRmsResidual_m,
     alignmentMaxResidual_m: scenario.coordinateReference.alignmentMaxResidual_m,
-    groundCandidateCount: scenario.groundCandidates.length,
-    groundSelection: scenario.groundSelection,
     warnings: scenario.diagnostics.warnings,
+    dynamicComparison: {
+      status: 'passed',
+      receiverGeometryMode: comparisonReport.receiverGeometry.mode,
+      comparedFrameCount: comparisonReport.frameCounts.compared,
+      realizationCount: comparisonReport.realizationCount,
+      initialFrameCount: receiverTrackSummary.frameCount > 0 ? 1 : 0,
+      movingFrameCount: receiverTrackSummary.movingFrameCount,
+      stationaryFrameCount: receiverTrackSummary.stationaryFrameCount,
+      totalDistance_m: receiverTrackSummary.totalDistance_m,
+      elapsed_ms: comparisonElapsed_ms,
+    },
     renamedImport: {
       status: 'passed',
       scenarioIdStable: true,

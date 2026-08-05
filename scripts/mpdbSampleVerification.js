@@ -63,3 +63,33 @@ export function assertExpectedMpdbSample(scenario) {
     );
   }
 }
+
+export function assertDynamicComparisonReport(report, expectedFrameCount) {
+  const frames = report?.frames;
+  if (!Array.isArray(frames) || frames.length !== expectedFrameCount) {
+    throw new Error(
+      `MPDB 动态比较验收失败: frames.length=${frames?.length}, expected ${expectedFrameCount}`,
+    );
+  }
+
+  const metricNames = [
+    'jsDivergence_bits',
+    'weightedDelayDistance_s',
+    'rmsDelaySpreadDifference_s',
+  ];
+  frames.forEach((frame, frameIndex) => {
+    if (frame?.frameId !== frameIndex) {
+      throw new Error(
+        `MPDB 动态比较验收失败: frame[${frameIndex}].frameId=${frame?.frameId}, expected ${frameIndex}`,
+      );
+    }
+    for (const metricName of metricNames) {
+      const value = frame.metrics?.[metricName];
+      if (!Number.isFinite(value)) {
+        throw new Error(
+          `MPDB 动态比较验收失败: frame[${frameIndex}].metrics.${metricName}=${value}, expected finite`,
+        );
+      }
+    }
+  });
+}

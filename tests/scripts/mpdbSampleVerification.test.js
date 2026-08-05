@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  assertDynamicComparisonReport,
   assertExpectedMpdbSample,
   buildMismatchedConfigFiles,
   renameSampleFiles,
@@ -16,6 +17,17 @@ function config(nodeGroup, endTime = 2000) {
       simulation: { simulationWindow: { startTime: 1000, endTime } },
     })),
   };
+}
+
+function dynamicComparisonFrames(frameCount = 179) {
+  return Array.from({ length: frameCount }, (_, frameId) => ({
+    frameId,
+    metrics: {
+      jsDivergence_bits: 0.1,
+      weightedDelayDistance_s: 2e-9,
+      rmsDelaySpreadDifference_s: -3e-9,
+    },
+  }));
 }
 
 describe('MPDB sample acceptance helpers', () => {
@@ -49,5 +61,37 @@ describe('MPDB sample acceptance helpers', () => {
       carrier: { frequency_Hz: 24_950_000_000 },
       coordinateReference: { alignmentRmsResidual_m: 0.01 },
     })).toThrow(/frameCount/);
+  });
+
+  it('accepts a complete dynamic comparison report with finite fit metrics', () => {
+    expect(() => assertDynamicComparisonReport({
+      frames: dynamicComparisonFrames(),
+    }, 179)).not.toThrow();
+  });
+
+  it('rejects the wrong dynamic comparison frame count', () => {
+    expect(() => assertDynamicComparisonReport({
+      frames: dynamicComparisonFrames(178),
+    }, 179)).toThrow(/frames\.length=178, expected 179/);
+  });
+
+  it('rejects a discontinuous dynamic comparison frame ID', () => {
+    const frames = dynamicComparisonFrames();
+    frames[4].frameId = 5;
+
+    expect(() => assertDynamicComparisonReport({ frames }, 179))
+      .toThrow(/frame\[4\]\.frameId=5, expected 4/);
+  });
+
+  it.each([
+    ['jsDivergence_bits', Number.NaN],
+    ['weightedDelayDistance_s', Number.POSITIVE_INFINITY],
+    ['rmsDelaySpreadDifference_s', Number.NEGATIVE_INFINITY],
+  ])('rejects a non-finite %s metric', (metricName, value) => {
+    const frames = dynamicComparisonFrames();
+    frames[4].metrics[metricName] = value;
+
+    expect(() => assertDynamicComparisonReport({ frames }, 179))
+      .toThrow(new RegExp(`frame\\[4\\]\\.metrics\\.${metricName}`));
   });
 });

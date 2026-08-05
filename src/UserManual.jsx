@@ -466,23 +466,24 @@ export default function UserManual({ onClose }) {
                         <tbody>
                             <tr><td style={tdStyle}>MPDB ZIP</td><td style={tdStyle}>PyTorch ZIP / Pickle 2</td><td style={tdStyle}>列式射线、frame ID、复系数、时延、角度与坐标</td></tr>
                             <tr><td style={tdStyle}>base station config</td><td style={tdStyle}>JSON</td><td style={tdStyle}>卫星轨迹、发射机、天线、功率和仿真时间窗</td></tr>
-                            <tr><td style={tdStyle}>terminal config</td><td style={tdStyle}>JSON</td><td style={tdStyle}>静态地面候选、接收机、天线和带宽</td></tr>
+                            <tr><td style={tdStyle}>terminal config</td><td style={tdStyle}>JSON</td><td style={tdStyle}>接收机轨迹、终端身份、天线和带宽</td></tr>
                         </tbody>
                     </table>
 
                     <h3 style={h3Style}>比较机制</h3>
                     <ol style={{ paddingLeft: '20px', fontSize: '0.9em' }}>
-                        <li>用户必须显式选择一个静态 ground frame，frame 0 也是合法选择。</li>
-                        <li>通过 scenarioId、frameId 和 frameOffsets 关联，不再依赖文件名。</li>
-                        <li>地面位置按容差标记 exact/approximate，默认只汇总 exact。</li>
-                        <li>统计模型默认运行 32 次确定性 realization，输出中位数、P5 和 P95。</li>
+                        <li>全程跟随 MPDB 原生接收机轨迹：同一 frame 使用同帧 TX、RX、RT 射线和统计几何；移动段按移动位置、静止段按静止位置播放。</li>
+                        <li>系统按配置内容与实体身份、scenarioId、frameId 和 frameOffsets 关联；配置身份错配会被拒绝，文件名不参与关联。</li>
+                        <li>需要固定点比较时，请在 Lauraycs 中生成固定终端 MPDB 后导入；UI 不会冻结某一 frame 代替整段 RX 轨迹。</li>
+                        <li>统计模型固定运行 32 次确定性 realization，输出中位数、P5 和 P95。环境、TEC 或已启用校准的散射功率偏移变化后，旧报告失效，需重新计算。</li>
                         <li>PDP 以最早路径为零点，10 ns 分箱，同一 bin 内复振幅相干聚合。</li>
+                        <li>主 CIR 播放器的 RT 叠加默认开启：统计 median 为青色、P5/P95 为边界、RT PDP 为红色；同时显示真实 frameId、UTC、RX 坐标、运动状态、仰角、斜距和三项拟合指标。</li>
                     </ol>
 
                     <div style={warnStyle}>
                         <strong>⚠️ 绝对功率不可用：</strong>MPDB 的复系数 H 没有可追溯的绝对归一化，
                         因此 RT 接收功率、SNR 和 path loss 返回 UNDEFINED_H_NORMALIZATION，不做常数偏移伪造。
-                        旧 .mat / trajectory.csv / frame 文件名握手已移除。
+                        RT 与统计 PDP 各自按峰值归一化，图表只比较形状与时延结构，不表示绝对功率拟合。
                     </div>
                 </div>
 

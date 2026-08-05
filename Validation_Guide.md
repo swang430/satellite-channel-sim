@@ -81,20 +81,26 @@ node scripts/verify-mpdb-sample.mjs <MPDB.zip> <base.json> <terminal.json>
 | ray count | 465,512 |
 | carrier | 24,950,000,000 Hz |
 | coordinate RMS | < 0.05 m |
+| comparison frames | 179 |
+| realizations per frame | 32 |
+| receiver geometry mode | `mpdb-track` |
 
-还必须验证任意重命名后仍能导入，以及错配配置会被拒绝。
+动态比较报告还必须满足：frameId 从 0 到 178 连续，Jensen–Shannon divergence、加权时延距离和 RMS 时延扩展差逐帧为有限值；接收机轨迹摘要中首帧单列为 initial，移动帧与静止帧只统计后续 178 个帧间转移。还必须验证任意重命名后仍能导入，以及错配配置会被拒绝。
 
-## 5. 地面帧选择与比较
+## 5. MPDB 原生接收机轨迹比较
 
-导入后 `groundSelection=null` 是合法草稿状态，但不得开始比较。用户必须显式选择 frame，包括 frame 0。
+MPDB 接收机轨迹是逐帧比较的几何事实源。对 frame N，必须同时使用 TX track[N]、RX track[N]、RT frameOffsets[N] 和相同 TX/RX 几何重新生成的统计信道；不得在 UI 中冻结某一帧的 RX 坐标来代替整段轨迹。移动段按移动位置播放，静止段按静止位置播放。固定点比较必须使用 Lauraycs 生成的固定终端 MPDB。
 
-匹配状态：
+三项输入不得通过文件名关联。关联与拒绝规则必须覆盖：
 
-- `exact`：地面位置差小于用户选择的容差；
-- `approximate`：可查询但默认不进入汇总；
-- 不得由文件名或“最近时间”替代 frame ID 关联。
+- 按内容识别 base station / terminal 配置角色；
+- 校验实体身份、仿真时间窗与采样间隔；
+- 通过 `scenarioId`、连续 `frameId` 和 `frameOffsets` 对齐；
+- 配置身份或时间窗错配必须拒绝。
 
 统计 ensemble 默认 32 次 realization，seed 由 scenario ID、frame ID 和 realization ID 决定。相同输入必须得到相同结果。
+
+主 CIR 播放器的 RT 叠加默认开启：统计 median 使用青色，P5/P95 显示为边界，RT PDP 使用红色。播放器必须展示真实 frameId、UTC、RX 坐标、运动状态、帧间位移、仰角、斜距和三项拟合指标。环境、TEC 或已启用校准中的散射功率偏移变化后，旧报告必须失效，用户需要重新运行比较。
 
 RT 绝对功率必须保持：
 
@@ -102,7 +108,7 @@ RT 绝对功率必须保持：
 unavailable / UNDEFINED_H_NORMALIZATION
 ```
 
-只允许比较相对 PDP、时延、角度和多普勒；不得从 `H` 伪造 SNR、接收功率或路径损耗。
+RT 与统计 PDP 必须分别做峰值归一化，只允许比较相对 PDP 的形状和时延结构；不得把图形重叠解释为绝对功率拟合，也不得从 `H` 伪造 SNR、接收功率或路径损耗。
 
 ## 6. 校准
 
@@ -141,7 +147,7 @@ unavailable / UNDEFINED_H_NORMALIZATION
 
 ## 9. 最终静态审计
 
-静态搜索旧 MAT 导入函数、文件名握手、把 SNR 当路径损耗以及从噪声底反推 C/N0 的模式；这些模式不应再出现在实现中。
+静态搜索旧 MAT 导入函数、静态 RX 帧选择、把 SNR 当路径损耗以及从噪声底反推 C/N0 的模式；这些模式不应再出现在实现中。
 
 ```bash
 rg -n "legacy.*import|\\.mat|trajectory\\.csv" src README.md Validation_Guide.md

@@ -48,27 +48,26 @@ HOST=0.0.0.0 npm run api
 - frame ID、射线数量、载频与带宽；
 - MPDB 局部坐标到 WGS84/ECEF 的拟合残差。
 
-导入成功后必须由用户显式选择一个静态地面帧。系统不会自动替用户决定地面点。选择会增加 `comparisonRevision`，旧比较结果随之失效。
+导入成功后，系统直接使用 MPDB 的原生接收机轨迹。每个 frame 都以同一索引下的卫星位置、接收机位置、RT 射线和统计模型几何进行比较：MPDB 中接收机移动时按移动位置播放，静止时按静止位置播放。UI 不会把某一帧冻结成全程地面点；如果需要比较固定点，应先让 Lauraycs 生成固定终端 MPDB，再导入本系统。
 
 ## RT 与统计模型比较
 
-旧的 `.mat + trajectory.csv + frame_*.mat` 文件名握手已经删除。当前关联依据是：
+三项输入的关联不依赖文件名，而是依据：
 
 - 内容寻址的 `scenarioId`；
-- MPDB `frameId` 与列式 `frameOffsets`；
-- 用户选择的 ground frame；
-- 明确的几何容差和 exact/approximate 状态。
+- JSON 内容中的配置角色、实体身份和仿真时间窗；
+- MPDB `frameId`、列式 `frameOffsets` 以及逐帧索引。
 
-默认只汇总 exact 匹配帧，approximate 帧仍可查询。统计模型默认每帧运行 32 个确定性 seed 的 realization，报告中位数、P5 和 P95。
+配置身份或仿真时间窗错配会被拒绝。统计模型对每个 MPDB frame 默认运行固定 32 个确定性 seed 的 realization，报告中位数、P5 和 P95。环境、TEC 或已启用校准 profile 中的 `scatterPowerOffset_dB` 发生变化时，旧报告立即失效，必须重新计算。
 
-比较指标包括相对 PDP 的 Jensen–Shannon divergence、加权时延距离、RMS 时延差、到达/离开角差和多普勒差。
+主 CIR 播放器逐帧显示真实 frameId、UTC、接收机经纬高、移动/静止状态、帧间位移、仰角、斜距，以及 Jensen–Shannon divergence、加权时延距离和 RMS 时延扩展差。统计中位数为青色，P5/P95 为区间边界；红色 RT PDP 叠加开关默认开启，可关闭以单独查看统计结果。
 
 ### PDP 定义
 
 - 以该帧最早到达路径为 excess-delay 零点；
 - 默认 10 ns 分箱；
 - 同一 bin 内先对复振幅相干求和，再计算功率；
-- RT 和统计模型使用相同的相对 PDP 定义。
+- RT 和统计模型使用相同的相对 PDP 定义，并分别按各自峰值归一化。
 
 MPDB 的复系数 `H` 没有给出可追溯的绝对功率归一化。因此 RT 绝对功率始终报告：
 
@@ -77,7 +76,7 @@ status: unavailable
 reason: UNDEFINED_H_NORMALIZATION
 ```
 
-系统不会通过常数偏移伪造 RT 接收功率、SNR 或路径损耗。
+因此播放器只用于比较 PDP 形状和时延结构，不代表绝对功率拟合。系统不会通过常数偏移伪造 RT 接收功率、SNR 或路径损耗。
 
 ## 统计信道与几何
 
@@ -153,7 +152,7 @@ node scripts/verify-mpdb-sample.mjs \
   /absolute/path/to/terminal-config.json
 ```
 
-脚本验证 179 帧、465,512 条射线、24.95 GHz 和小于 0.05 m 的坐标 RMS 残差。
+脚本验证 179 帧、465,512 条射线、24.95 GHz 和小于 0.05 m 的坐标 RMS 残差；随后按原生接收机轨迹完成 179 帧、每帧 32 次 realization 的动态比较，检查三项拟合指标均为有限值，并输出移动/静止帧统计。脚本还验证输入文件重命名不改变 `scenarioId`，且配置身份错配会被拒绝。
 
 ## 代码结构
 
