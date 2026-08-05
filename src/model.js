@@ -1,7 +1,6 @@
 import * as satelliteModule from 'satellite.js';
 const satellite = satelliteModule.degreesToRadians ? satelliteModule : satelliteModule.default;
-import { create, all } from 'mathjs';
-const math = create(all);
+import { computeStatisticalCir } from './channel/statisticalCir.js';
 
 // ITU-R P.838-3 Table 1: Specific rain attenuation coefficients (horizontal polarization).
 // Sorted by frequency (GHz). Used for log-linear interpolation per the standard.
@@ -889,142 +888,63 @@ export function getCalibParamDefs() {
 }
 
 // === 信道冲激响应 (CIR) — 抽头延迟线 (TDL) 模型 ===
-const C_M_S = 299792458; // 光速 (m/s)
-
 export function computeCIR(params) {
-  const { freq, elevation, slantRange: inputSlantRange, env, tec = 50, rainRate = 0, correctionFactor = 1.0, hpbw = 2.0, simTime = 0, satAlt } = params;
-
-  const elevRad = Math.max(0.1, elevation) * Math.PI / 180;
-  const sinElev = Math.sin(elevRad);
-
-  // --- Slant Range: 如果未提供或为 GEO 默认值, 从仰角+轨道高度估算 ---
-  // 避免静态模式下使用 35786 km (GEO) 默认值导致合成时延失真
-  let slantRange = inputSlantRange;
-  const R_EARTH = 6371;  // km
-  if (!slantRange || slantRange > 20000) {
-    const h = satAlt || 550;  // 默认 LEO 550 km
-    // d = -R*sin(el) + sqrt((R*sin(el))^2 + 2*R*h + h^2)
-    const Rs = R_EARTH * sinElev;
-    slantRange = -Rs + Math.sqrt(Rs * Rs + 2 * R_EARTH * h + h * h);
-  }
-
-  // --- Tap 0: LOS 直射路径 ---
-  const losDelay_ns = (slantRange * 1e3 / C_M_S) * 1e9;
-  // 绝对 FSPL (dB)
-  const absoluteFspl = 20 * Math.log10(slantRange) + 20 * Math.log10(freq) + 92.45;
-
-  // 大气总衰减 — 与 calculateLinkBudget 保持一致，使用 ITU-R 标准函数
-  const { k: k_coeff, alpha: alpha_coeff } = getRainCoeffs(freq);
-  const gamma = k_coeff * Math.pow(rainRate, alpha_coeff) * correctionFactor;
-  const heightRain = 3.0;
-  const slantPath = heightRain / sinElev;
-  const rFactor = 1 / (1 + 0.045 * slantPath);
-  const attRain = gamma * slantPath * rFactor;
-
-  // ITU-R P.676-12: gas attenuation
-  const elevDeg = Math.max(0.1, elevation);
-  const attGas = gasAttenuationP676(freq, elevDeg);
-
-  // ITU-R P.840-8: cloud attenuation
-  const attCloud = cloudAttenuationP840(freq, elevDeg, params.columnarLWC_kgm2 ?? 0.5);
-
-  const totalAtmLoss = attRain + attGas + attCloud;
-
-  // LOS tap 幅度 (线性): 10^(-(FSPL + AtmLoss) / 20)
-  const losAmplitude = Math.pow(10, -(absoluteFspl + totalAtmLoss) / 20);
-  const losAmplitude_dB = -(absoluteFspl + totalAtmLoss);
-
-  const taps = [{
-    index: 0,
-    label: 'LOS (直射)',
-    delay_ns: losDelay_ns,
-    excessDelay_ns: 0,
-    amplitude_linear: losAmplitude,
-    amplitude_dB: losAmplitude_dB,
-    phase_rad: 0
-  }];
-
-  // --- Tap 1: 地面/海面反射 (仅 maritime 环境) ---
-  if (env === 'maritime') {
-    const h_rx = 15.0; // 天线高度 (m)
-    const pathDiff_m = 2 * h_rx * sinElev;
-    const excessDelay_ns = (pathDiff_m / C_M_S) * 1e9;
-    const reflCoeff = -0.85; // 海面菲涅尔反射系数 (近似)
-    const reflAmplitude = losAmplitude * Math.abs(reflCoeff);
-    const reflPhase = Math.PI; // 海面反射相位反转
-
-    taps.push({
-      index: 1,
-      label: '海面反射',
-      delay_ns: losDelay_ns + excessDelay_ns,
-      excessDelay_ns,
-      amplitude_linear: reflAmplitude,
-      amplitude_dB: 20 * Math.log10(reflAmplitude),
-      phase_rad: reflPhase
-    });
-  }
-
-  // --- Tap 2~3: 建筑/植被散射 (urban/suburban) ---
-  if (env === 'urban' || env === 'suburban') {
-    // Lutz-LMS 散射多径分量
-    const scatterParams = env === 'urban'
-      ? [{ delay: 100, power: -15, label: '建筑散射-近' }, { delay: 300, power: -22, label: '建筑散射-远' }]
-      : [{ delay: 80, power: -18, label: '植被散射-近' }, { delay: 200, power: -25, label: '植被散射-远' }];
-
-    // 散射功率随仰角递减（高仰角时遮蔽少）
-    const elevFactor = Math.max(0.1, 1.0 - elevation / 90.0);
-
-    scatterParams.forEach((sp, i) => {
-      const scatterPower_dB = losAmplitude_dB + sp.power * elevFactor;
-      const scatterAmplitude = Math.pow(10, scatterPower_dB / 20);
-      // 散射相位随时间准确定性变化 (SoS)
-      const phase = simTime > 0 ? getSoSFade(simTime + i * 7.3) * Math.PI : (i + 1) * 1.7;
-
-      taps.push({
-        index: taps.length,
-        label: sp.label,
-        delay_ns: losDelay_ns + sp.delay,
-        excessDelay_ns: sp.delay,
-        amplitude_linear: scatterAmplitude,
-        amplitude_dB: scatterPower_dB,
-        phase_rad: phase
-      });
-    });
-  }
-
-  // --- Tap N: 电离层色散分量 (ITU-R P.531 / 3GPP TR 38.811 附加效应) ---
-  const tecVal = tec || 50;
-  const dispersionNs = (2.0 * 1.3433 * tecVal * 0.4) / (Math.pow(freq, 3) * sinElev);
-  if (dispersionNs > 0.01) {
-    const ionoPower_dB = losAmplitude_dB - 30 - 10 * Math.log10(freq); // 电离层散射功率随频率递减
-    const ionoAmplitude = Math.pow(10, ionoPower_dB / 20);
-    taps.push({
-      index: taps.length,
-      label: '电离层色散',
-      delay_ns: losDelay_ns + dispersionNs,
-      excessDelay_ns: dispersionNs,
-      amplitude_linear: ionoAmplitude,
-      amplitude_dB: ionoPower_dB,
-      phase_rad: simTime > 0 ? getSoSFade(simTime * 0.3) * Math.PI * 0.5 : 0.5
-    });
-  }
-
-  // --- 统计量计算 ---
-  const totalPower = taps.reduce((s, t) => s + t.amplitude_linear * t.amplitude_linear, 0);
-  const meanDelay = taps.reduce((s, t) => s + t.excessDelay_ns * t.amplitude_linear * t.amplitude_linear, 0) / totalPower;
-  const meanDelaySq = taps.reduce((s, t) => s + t.excessDelay_ns * t.excessDelay_ns * t.amplitude_linear * t.amplitude_linear, 0) / totalPower;
-  const rmsDelaySpread_ns = Math.sqrt(Math.max(0, meanDelaySq - meanDelay * meanDelay));
-
-  // 相干带宽 (MHz): Bc = 1 / (5 * sigma_tau)
-  const coherenceBandwidth_MHz = rmsDelaySpread_ns > 0.001 ? 1000.0 / (5.0 * rmsDelaySpread_ns) : 99999;
+  const frequency_GHz = params.freq ?? 30;
+  const elevation_deg = params.elevation ?? 45;
+  const environment = params.env ?? 'rural';
+  const tec_TECU = params.tec ?? 50;
+  const firstPass = computeStatisticalCir({
+    frequency_Hz: frequency_GHz * 1e9,
+    elevation_deg,
+    slantRange_m: params.slantRange == null ? undefined : params.slantRange * 1e3,
+    satelliteAltitude_m: (params.satelliteAltitude_km ?? params.satAlt ?? 550) * 1e3,
+    environment,
+    tec_TECU,
+    bandwidth_Hz: (params.bandwidth ?? 400) * 1e6,
+    scatterPowerOffset_dB: params.scatterPowerOffset_dB ?? 0,
+    simTime_s: params.simTime ?? 0,
+  });
+  const budget = calculateLinkBudget({
+    ...params,
+    freq: frequency_GHz,
+    elevation: elevation_deg,
+    slantRange: firstPass.slantRange_m / 1e3,
+    tec: tec_TECU,
+  });
+  const cir = computeStatisticalCir({
+    frequency_Hz: frequency_GHz * 1e9,
+    elevation_deg,
+    slantRange_m: firstPass.slantRange_m,
+    environment,
+    tec_TECU,
+    bandwidth_Hz: (params.bandwidth ?? 400) * 1e6,
+    scatterPowerOffset_dB: params.scatterPowerOffset_dB ?? 0,
+    atmosphericLoss_dB: budget.totalAtmosphericLoss,
+    simTime_s: params.simTime ?? 0,
+  });
 
   return {
-    taps,
-    rmsDelaySpread_ns,
-    coherenceBandwidth_MHz,
-    absoluteDelay_ns: losDelay_ns,
-    absoluteFspl,
-    totalAtmLoss
+    taps: cir.taps.map((tap, index) => ({
+      ...tap,
+      index,
+      delay_ns: tap.absoluteDelay_s * 1e9,
+      excessDelay_ns: tap.excessDelay_s * 1e9,
+      amplitude_linear: Math.hypot(
+        tap.complexAmplitude.real,
+        tap.complexAmplitude.imag,
+      ),
+      amplitude_dB: tap.power_dB,
+    })),
+    pdp: cir.pdp,
+    meanDelay_ns: cir.metrics.meanExcessDelay_s * 1e9,
+    rmsDelaySpread_ns: cir.metrics.rmsDelaySpread_s * 1e9,
+    coherenceBandwidth_MHz: Number.isFinite(cir.metrics.coherenceBandwidth_Hz)
+      ? cir.metrics.coherenceBandwidth_Hz / 1e6
+      : 99_999,
+    absoluteDelay_ns: cir.taps[0].absoluteDelay_s * 1e9,
+    absoluteFspl: cir.absoluteFspl_dB,
+    totalAtmLoss: cir.atmosphericLoss_dB,
+    slantRange_km: cir.slantRange_m / 1e3,
   };
 }
 
