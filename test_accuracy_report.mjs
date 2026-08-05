@@ -25,7 +25,7 @@ function calculateTheoreticalFSPL(distanceKm, freqGHz) {
 
 function runTest() {
     console.log("==================================================");
-    console.log("=== 卫星链路仿真常识准确率测试报告 ===");
+    console.log("=== 卫星链路物理常识回归报告 ===");
     console.log("==================================================\n");
 
     let metrics = { total: 0, pass: 0 };
@@ -33,12 +33,19 @@ function runTest() {
     function evaluateScenario(name, tleName, freq, eirp, gRx, timeOffsetHrs, env, rainRate, isLeo) {
         console.log(`[测试场景] ${name}`);
         
-        let now = new Date();
+        // 固定在 TLE 历元附近，避免使用过期 TLE 传播到当前日期造成不可重复结果。
+        let now = new Date('2023-09-07T00:00:00.000Z');
         let end = new Date(now.getTime() + timeOffsetHrs * 3600 * 1000);
         let res = generateChannelTimeSeries(
             TLEs[tleName][0], TLEs[tleName][1],
             22.54, 114.05, 0, now, end, 60,
-            { freq, eirp, gRx, tRx: 150, bandwidth: 400, rainRate: rainRate, env: env }
+            {
+                freq, eirp, gRx, tRx: 150, bandwidth: 400,
+                rainRate: rainRate, env: env,
+                // 本报告分别隔离 FSPL、雨衰和环境损耗；电离层与快衰落有专项测试。
+                tec: 0,
+                disableFastFading: true,
+            }
         );
         
         let validFrames = res.filter(f => f.elevation > 0);
@@ -109,12 +116,13 @@ function runTest() {
     let rate = (metrics.pass / metrics.total) * 100;
     console.log(`最终准确率得分: ${metrics.pass} / ${metrics.total} 项校验通过 (${rate.toFixed(0)}%)`);
     if (rate === 100) {
-        console.log("整体评价: 【S级】当前的底层仿真链路预算 100% 严格遵守 ITU-R 和经典 Friis 传播模型，无物理常识性违背。");
+        console.log("整体评价: 设定的物理常识边界全部通过；本报告不是 ITU-R 一致性认证。");
     } else if (rate >= 80) {
         console.log("整体评价: 【A级】整体符合物理常识，可能在某些极端环境模型上有特定参数溢出。");
     } else {
         console.log("整体评价: 【C级】需要重新审查天线增益、单位换算或距离算子。");
     }
+    if (metrics.pass !== metrics.total) process.exitCode = 1;
 }
 
 runTest();

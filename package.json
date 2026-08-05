@@ -8,8 +8,9 @@
     "build": "vite build",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:physics": "node test.mjs && node test_channel_sim.mjs && node test_accuracy_report.mjs",
     "test:watch": "vitest",
-    "verify": "npm run test && npm run lint && npm run build",
+    "verify": "npm run test && npm run test:physics && npm run lint && npm run build",
     "preview": "vite preview",
     "api": "node server/index.js",
     "full": "concurrently \"npm run dev\" \"npm run api\""
@@ -22,7 +23,7 @@
     "react-chartjs-2": "^5.3.1",
     "react-dom": "^19.2.0",
     "satellite.js": "^6.0.2",
-    "ws": "^8.18.0"
+    "ws": "^8.21.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

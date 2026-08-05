@@ -1,10 +1,8 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { lazy, Suspense, useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Line, Bar } from 'react-chartjs-2';
 import { generateChannelTimeSeries, predictPasses, calibrateModel, applyCalibration, createDefaultCalibration, getCalibParamDefs } from './model.js';
 import { getSatelliteList, getSatelliteBandParams } from './knownSatellites.js';
 import { SimulationValidator } from './ValidationModule.js';
-import MpdbImportPanel from './features/mpdb-import/MpdbImportPanel.jsx';
-import ChannelComparisonPanel from './features/channel-comparison/ChannelComparisonPanel.jsx';
 import {
     groundStationDistanceKm,
     parseCalibrationDataset,
@@ -13,6 +11,9 @@ import {
     loadCalibrationProfile,
     saveCalibrationProfile,
 } from './calibration/storage.js';
+
+const MpdbImportPanel = lazy(() => import('./features/mpdb-import/MpdbImportPanel.jsx'));
+const ChannelComparisonPanel = lazy(() => import('./features/channel-comparison/ChannelComparisonPanel.jsx'));
 
 /**
  * Channel Propagation Simulator Panel
@@ -32,9 +33,9 @@ export default function ChannelSimPanel({
     onCirSyncStateChange
 }) {
     // === Ground Station Config ===
-    const [gsLat, setGsLat] = useState(groundStation?.lat ?? 31.062718);
-    const [gsLon, setGsLon] = useState(groundStation?.lon ?? 121.244818);
-    const [gsAlt, setGsAlt] = useState(groundStation?.alt ?? 15);
+    const gsLat = groundStation?.lat ?? 31.062718;
+    const gsLon = groundStation?.lon ?? 121.244818;
+    const gsAlt = groundStation?.alt ?? 15;
 
     // === Time Config ===
     const [durationMin, setDurationMin] = useState(30);
@@ -48,17 +49,8 @@ export default function ChannelSimPanel({
     const bandwidth = globalParams?.bandwidth ?? 400.0;
     const tec = globalParams?.tec ?? 50.0;
     const rainRate = globalParams?.rainRate ?? 5.0;
-    // env 和 disableFastFading 保留本地控制（仿真模式专属）
-    const [env, setEnv] = useState(globalParams?.env || 'suburban');
+    const env = globalParams?.env ?? 'suburban';
     const [disableFastFading, setDisableFastFading] = useState(true);
-    // 当 globalParams.env 外部改变时同步
-    const prevGlobalEnvRef = React.useRef(globalParams?.env);
-    useEffect(() => {
-        if (globalParams?.env && globalParams.env !== prevGlobalEnvRef.current) {
-            prevGlobalEnvRef.current = globalParams.env;
-            setEnv(globalParams.env);
-        }
-    }, [globalParams?.env]);
 
     // === Calibration State ===
     const [calibProfile, setCalibProfile] = useState(() => {
@@ -91,6 +83,7 @@ export default function ChannelSimPanel({
     // === Output State ===
     const [generatedTimeline, setGeneratedTimeline] = useState([]);
     const [mpdbScenario, setMpdbScenario] = useState(null);
+    const [showMpdbTools, setShowMpdbTools] = useState(false);
     const timeline = generatedTimeline;
     
     const [generatedTrajectorySamples, setGeneratedTrajectorySamples] = useState([]);
@@ -106,18 +99,6 @@ export default function ChannelSimPanel({
     const [searchingPass, setSearchingPass] = useState(false);
 
     const cirCanvasRef = useRef(null);
-    const hasGroundStationProp = groundStation != null;
-    const groundStationLat = groundStation?.lat;
-    const groundStationLon = groundStation?.lon;
-    const groundStationAlt = groundStation?.alt;
-
-    useEffect(() => {
-        if (!hasGroundStationProp) return;
-        if (groundStationLat != null) setGsLat(groundStationLat);
-        if (groundStationLon != null) setGsLon(groundStationLon);
-        if (groundStationAlt != null) setGsAlt(groundStationAlt);
-    }, [hasGroundStationProp, groundStationLat, groundStationLon, groundStationAlt]);
-
     // === Find Next Pass ===
     function handleFindPass() {
         if (!tleLine1 || !tleLine2) {
@@ -225,9 +206,6 @@ export default function ChannelSimPanel({
     }
 
     function updateGroundStation(nextGroundStation) {
-        setGsLat(nextGroundStation.lat);
-        setGsLon(nextGroundStation.lon);
-        setGsAlt(nextGroundStation.alt);
         onGroundStationChange?.(nextGroundStation);
     }
 
@@ -255,9 +233,6 @@ export default function ChannelSimPanel({
                 lon: selected.longitude_deg,
                 alt: selected.altitude_m
             };
-            setGsLat(nextGroundStation.lat);
-            setGsLon(nextGroundStation.lon);
-            setGsAlt(nextGroundStation.alt);
             onGroundStationChange?.(nextGroundStation);
         }
     }, [onGroundStationChange]);
@@ -298,25 +273,19 @@ export default function ChannelSimPanel({
         return () => clearInterval(timer);
     }, [isCirPlaying, cirFps, timeline.length]);
 
-    useEffect(() => {
-        if (timeline.length === 0) {
-            if (cirIdx !== 0) setCirIdx(0);
-            return;
-        }
-        if (cirIdx >= timeline.length) {
-            setCirIdx(timeline.length - 1);
-        }
-    }, [timeline.length, cirIdx]);
-
     const prevRequestedIdxRef = useRef(requestedCirIndex);
     useEffect(() => {
         if (!Number.isInteger(requestedCirIndex)) return;
         if (requestedCirIndex < 0 || requestedCirIndex >= timeline.length) return;
         if (prevRequestedIdxRef.current !== requestedCirIndex) {
             prevRequestedIdxRef.current = requestedCirIndex;
-            setIsCirPlaying(false);
-            setCirIdx(requestedCirIndex);
+            const timer = setTimeout(() => {
+                setIsCirPlaying(false);
+                setCirIdx(requestedCirIndex);
+            }, 0);
+            return () => clearTimeout(timer);
         }
+        return undefined;
     }, [requestedCirIndex, timeline.length]);
 
     useEffect(() => {
@@ -752,7 +721,7 @@ export default function ChannelSimPanel({
                     <div style={inputGroupStyle}>
                         <strong style={{ fontSize: '0.9em' }} title="Based on 3GPP TR 38.811 & ITU-R Models">{'\u2699\ufe0f'} Channel Engine <span style={{ fontSize: '0.8em', color: '#888', fontWeight: 'normal' }}>(3GPP TR 38.811 / ITU-R)</span></strong>
                         <label style={labelStyle}>Env:
-                            <select value={env} onChange={e => setEnv(e.target.value)} style={selectStyle}>
+                            <select value={env} onChange={e => onLinkParamsChange?.({ env: e.target.value })} style={selectStyle}>
                                 <option value="suburban">suburban</option>
                                 <option value="urban">urban</option>
                                 <option value="rural">rural</option>
@@ -922,7 +891,7 @@ export default function ChannelSimPanel({
                                                             statusParts.push(`⛔ ${noMetricCount}个点无任何测量指标，将被忽略`);
                                                         }
                                                         // 环境
-                                                        if (meta.environment) setEnv(meta.environment);
+                                                        if (meta.environment) onLinkParamsChange?.({ env: meta.environment });
                                                         if (meta.tec_TECU != null) onLinkParamsChange?.({ tec: meta.tec_TECU });
                                                         if (meta.description) statusParts.push(`📝 ${meta.description}`);
                                                     }
@@ -1223,13 +1192,26 @@ export default function ChannelSimPanel({
                 </div>
             )}
 
-            <div data-mpdb-scenario-id={mpdbScenario?.scenarioId ?? ''}>
-                <MpdbImportPanel onScenarioChange={handleMpdbScenarioChange} />
-            </div>
-            <ChannelComparisonPanel
-                key={`${mpdbScenario?.scenarioId ?? 'none'}-${mpdbScenario?.comparisonRevision ?? 0}`}
-                scenario={mpdbScenario}
-            />
+            <button
+                type="button"
+                onClick={() => setShowMpdbTools(visible => !visible)}
+                style={{ ...btnExport, marginBottom: '12px', borderColor: '#ffd60a', color: '#ffd60a' }}
+            >
+                {showMpdbTools ? '收起 MPDB / RT 比较工具' : '加载 MPDB / RT 比较工具'}
+            </button>
+            {showMpdbTools && (
+                <Suspense fallback={<div style={{ color: '#aaa', marginBottom: '12px' }}>正在按需加载 MPDB 解析器…</div>}>
+                    <div data-mpdb-scenario-id={mpdbScenario?.scenarioId ?? ''}>
+                        <MpdbImportPanel onScenarioChange={handleMpdbScenarioChange} />
+                    </div>
+                    {mpdbScenario && (
+                        <ChannelComparisonPanel
+                            key={`${mpdbScenario.scenarioId}-${mpdbScenario.comparisonRevision ?? 0}`}
+                            scenario={mpdbScenario}
+                        />
+                    )}
+                </Suspense>
+            )}
 
             {timeline.length === 0 && (
                 <div style={{ fontSize: '0.85em', color: '#aaa', marginBottom: '15px' }}>

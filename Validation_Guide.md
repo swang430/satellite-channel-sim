@@ -1,89 +1,150 @@
-# 卫星信道仿真常识验证指南 (Validation Guide)
+# 验证指南
 
-本指南介绍了如何评估和自动化测试 `Satellite-Channel-Sim` 项目中星地链路仿真的正确性。我们的验证方法基于“**理论基准+统计模型对齐**”的思路，避免了仅仅为了让结果“看起来像”而生搬硬套数据，而是严格遵从物理常识（Rule of Thumb）。
+本指南说明如何验证轨道、统计信道、Lauraycs MPDB 导入、RT 对比、校准和 API 边界。验证原则是：单位明确、来源可追溯、不可比较的数据明确 unavailable，不使用视觉上“像正确”的常数修补。
 
-## 1. 验证的核心思路与理论依据
+## 1. 自动化入口
 
-卫星到达地面的信号极其微弱，受制于自由空间路径损耗（FSPL）以及各种大气衰减。我们的验证重点考察了以下几个物理常识点：
-
-### 1.1 自由空间路径损耗 (FSPL) 与链路预算基线
-* **理论对比**：根据经典 Friis 传输方程，链路基线可以写为：
-  `接收功率(dBm) = EIRP(dBW) + 30 + 接收天线增益(dBi) - FSPL`
-* **合理性判定**：
-  * 在晴天、开阔（Rural）场景下，仿真算出的接收功率，与上方纯理想真空理论公式之间的差值，应该在 **0 ~ 8 dB** 内（这部分差值对应了正常的大气气体吸收、极化损耗、对齐误差）。
-  * 任何偏离这个区间的极大误差（如接收到正数功率，或误差高达 30dB），必然意味着单位换算（如 dBW 错当 dBm）或算子发生严重错误。
-
-### 1.2 动态多普勒/信噪比 (SNR) 包络特征
-* **低轨卫星 (LEO)**：由于运动极快，在过境期间（从地平线 AOS 到天顶，再到落下 LOS），由于距离急剧变化和天线方向图的影响，接收信号必定会呈现一个动态范围极大（通常 > 20dB）的倒“U”形抛物线。
-* **合理性判定**：如果输入的是 LEO 轨道的 TLE 根数，仿真生成的 SNR 时间序列其“最大值减去最小值”必须显著大于某阈值（如 5dB），如果曲线是一条直线，则不符合常识。
-
-### 1.3 降雨衰减 (Rain Attenuation) — ITU-R P.838-3
-
-* **频段差异**：对于 10GHz 以上的频段（如 Ku/Ka 波段），降雨衰减非常致命。
-* **合理性判定**：在引入 `50mm/h` 暴雨的条件下，Ka/Ku 频段的隐性附加损耗应当相比晴天出现断崖式跌落（如附加衰减突增 > 10dB）。低频段（S波段，2GHz 左右）则几乎免疫，附加损耗不会有显著变化。
-* **实现**：19点查找表 + 对数线性插值（k 在对数空间，α 线性），完全符合 P.838-3 规范。
-
-### 1.3a 气体衰减 (Gas Attenuation) — ITU-R P.676-12
-
-* **模型**：P.676-12 Annex 2 简化公式，分别计算氧气（γ_o）和水蒸气（γ_w）的特定衰减，按有效路径高度积分。
-* **合理性判定**：标准大气下，仰角 45° 时气体衰减应满足：
-  * 10 GHz：~0.09 dB（误差 ±0.03 dB 可接受）
-  * 22.2 GHz（水蒸气共振）：应明显高于邻近频率（约 0.15 dB 峰值）
-  * 30 GHz：~0.20 dB
-  * 60 GHz 附近：不适合卫星链路（氧气吸收峰 > 10 dB/km）
-* **已废弃**：原来的五档阶梯查表（0.05 / 0.2 / 0.3 / 0.8 / 4.0 dB 天顶值）已被 P.676-12 取代。
-
-### 1.3b 云/雾衰减 (Cloud Attenuation) — ITU-R P.840-8
-
-* **模型**：双 Debye 介电模型计算 K_l，A_c = K_l × L / sin(θ)，L 为柱状液水含量（默认 0.5 kg/m²）。
-* **合理性判定**：30 GHz、仰角 45° 下，中等云（L = 0.5 kg/m²）的云衰减应在 0.3–0.6 dB 范围内。
-* **已废弃**：原来的幂次近似 `K_l = 0.0002 × f^1.95` 误差可达 5 倍，已被 P.840-8 取代。
-
-### 1.4 多径与环境衰落 (Multipath Fading)
-* **环境差异**：Rural（乡村/开阔地）主要由视距 (LOS) 链路主导，损耗较小；Urban（城市）因为建筑群遮挡和散射，会导致附加损耗极高。
-* **合理性判定**：在相同 TLE 和频段下，将环境从 `rural` 切换到 `urban`，隐含的附加损耗应当明显增加（如额外增加 5~15dB 的遮挡/衰落裕度）。
-
----
-
-## 2. 自动化测试脚本使用方法
-
-为了保证以后修改代码（如修改底层 `model.js`）不会破坏现有的物理正确性，我们在项目中引入了一个纯后端的自动化测试脚本。
-
-### 运行方式
-在项目根目录执行：
 ```bash
-node test_accuracy_report.mjs
+npm run test
+npm run lint
+npm run build
+npm run verify
 ```
 
-### 预期输出示例与解读
-脚本会自动模拟多个极端/典型场景：
-1. **Starlink LEO (Ku-band, 12GHz, 晴天Rural)**：测试高频段大气衰减与 LEO 过境抛物线。
-2. **NOAA-19 (S-band, 2.2GHz, 晴天Rural)**：测试低频段抗衰减与包络动态范围。
-3. **GEO 卫星 (Ka-band, 30GHz, 暴雨50mm/h)**：测试极端降雨情况下的雨衰模型（Rain Attenuation）。
-4. **Starlink LEO (Ku-band, 12GHz, 城市Urban)**：测试多径衰落下的城市遮挡模型。
+`npm run verify` 必须同时满足：所有 Vitest 与物理回归测试通过、ESLint 零错误、Vite production build 零警告。
 
-控制台将输出每一项的对比指标：
+物理回归入口：
+
+```bash
+npm run test:physics
+```
+
+该命令运行确定性的数学边界、统计 CIR/时间序列和链路物理常识检查。校准由 `tests/calibration/` 下的 Vitest 测试覆盖；仅打印坐标、没有断言的 SGP4 调试脚本已删除。
+
+## 2. 轨道与链路几何
+
+重点检查：
+
+- TLE epoch 新鲜度有结构化诊断，不声明 stale TLE 的实时精度；
+- 经纬高单位分别为 degree、degree、meter；
+- satellite.js 高度只在边界处转换为 km；
+- ECI 到 ECEF 的速度转换包含 `-ω×r`；
+- 多普勒统一由相对径向速度和载频计算；
+- `elevation_deg <= 0` 的状态不作为有效接触；
+- LEO/GEO 使用各自真实斜距。
+
+FSPL 基准：
+
 ```text
-[测试场景] Starlink LEO (Ku-band, 12GHz, 晴天Rural)
-  > 最佳仰角: 43.7°
-  > 星地距离: 722 km
-  > 理论空载接收功率: -39.20 dBm
-  > 仿真输出接收功率: -44.92 dBm
-  > 隐含附加损耗(大气/植被/对齐偏差等): 5.72 dB
-  => 结论: ✅ 链路预算/衰落特征符合物理常识
-
-[测试场景] Starlink LEO (Ku-band, 12GHz, 城市Urban)
-  > 城市多径测试: 隐含附加损耗为 13.66 dB
-  => 结论: ✅ 链路预算/衰落特征符合物理常识
+FSPL(dB) = 20log10(d_km) + 20log10(f_GHz) + 92.45
 ```
-最终，脚本会给出一个评分（如 S级/A级/C级），用于快速判断当前的链路仿真基线是否稳定可靠。
 
----
+## 3. 统计 CIR/PDP
 
-## 3. Web 端 UI 诊断模块
+统计 CIR 必须保留：载频、带宽、斜距、环境、TEC、散射偏移和 seed 来源。
 
-除了离线自动化测试，我们也在 Web 端面板加入了诊断能力。
-位于 `src/ValidationModule.js`。
+PDP 统一规则：
 
-当你在浏览器页面（Web App）配置好参数，点击 **"Generate"** 按钮后，除了画出图表外，你也可以按 `F12` 打开浏览器的 **Console (控制台)**。
-程序会自动计算当前你配置的理论链路预算，并与图表实际展示的数值进行比对。如果发现严重失真，控制台会抛出 `❌ 偏差过大` 警告，协助你排查 UI 或参数输入的 Bug。
+1. 以最早到达路径为 excess-delay 零点；
+2. 默认 10 ns 分箱；
+3. 同一 bin 内复振幅相干相加；
+4. 功率由相干结果计算；
+5. 平均时延和 RMS 时延扩展使用同一归一化 PDP。
+
+GEO smoke test 不得被 LEO 默认高度覆盖；`tec_TECU=0`、`rainRate=0`、`scatterPowerOffset_dB=0` 必须原样保留。
+
+## 4. MPDB 导入
+
+导入必须使用三个显式文件，但不得通过文件名建立关系。验证内容包括：
+
+- JSON 内容分类为 base station / terminal；
+- simulation window、sample interval 和 simulation type 一致；
+- satellite ID 与 transmitter entity 对齐；
+- Pickle GLOBAL/REDUCE 白名单和资源上限生效；
+- storage dtype、byteorder、shape、stride 和长度一致；
+- `LINK_ID` 单调并生成正确 `frameOffsets`；
+- 必需列存在，复数 `H` 正确拆分；
+- 坐标拟合 RMS 与最大残差均有报告；
+- 载频冲突保留 provenance 和结构化诊断。
+
+真实样本命令：
+
+```bash
+node scripts/verify-mpdb-sample.mjs <MPDB.zip> <base.json> <terminal.json>
+```
+
+验收阈值：
+
+| 指标 | 预期 |
+|---|---:|
+| frame count | 179 |
+| ray count | 465,512 |
+| carrier | 24,950,000,000 Hz |
+| coordinate RMS | < 0.05 m |
+
+还必须验证任意重命名后仍能导入，以及错配配置会被拒绝。
+
+## 5. 地面帧选择与比较
+
+导入后 `groundSelection=null` 是合法草稿状态，但不得开始比较。用户必须显式选择 frame，包括 frame 0。
+
+匹配状态：
+
+- `exact`：地面位置差小于用户选择的容差；
+- `approximate`：可查询但默认不进入汇总；
+- 不得由文件名或“最近时间”替代 frame ID 关联。
+
+统计 ensemble 默认 32 次 realization，seed 由 scenario ID、frame ID 和 realization ID 决定。相同输入必须得到相同结果。
+
+RT 绝对功率必须保持：
+
+```text
+unavailable / UNDEFINED_H_NORMALIZATION
+```
+
+只允许比较相对 PDP、时延、角度和多普勒；不得从 `H` 伪造 SNR、接收功率或路径损耗。
+
+## 6. 校准
+
+校准输入必须区分：
+
+- `cn0_dBHz`：C/N0，dB-Hz；
+- `cn_dB`：带宽积分后的 C/N，dB；
+- `snr_dB`：SNR，dB；
+- `rssi_dBm`：接收功率；
+- `attenuation_dB`：大气衰减。
+
+每个需要绝对链路预算的点必须提供 `slantRange_km`，不得缺省到 GEO 距离。参考卫星只能覆盖明确提供的字段，并记录带宽、增益和噪温来源。
+
+当测量类型或数量不能辨识参数时，应冻结参数并返回 `UNIDENTIFIABLE_PARAMETER`。profile 序列化后必须通过 schemaVersion、confidence、condition 和 diagnostics 校验。
+
+## 7. Replay 与数据来源
+
+- Replay timestamp 必须是有效 ISO-8601；
+- 指标必须为有限数值；
+- 播放 start/stop/unmount 不得残留或重复 timer；
+- live/replay series 上限为 3,600 点；
+- Open-Meteo 降水标记 `observed-input`；
+- 本地计算的雨衰标记 `synthetic-derived`；
+- 旧 `measuredLoss` 没有来源证据时按 derived 处理并给出诊断。
+
+## 8. NTN、DVB 与 API
+
+- SNR 不得当 path loss；缺少 path loss 时返回 unavailable；
+- DVB 表输入是 Es/N0，不能直接传 SNR；
+- 低于最低 MODCOD 门限返回 outage 和 null efficiency；
+- SNR 启发式建议必须标记 `heuristic-not-standard-compliant`；
+- 空 MODCOD timeline 必须显示空状态；
+- API 对 NaN、Infinity、越界经纬高、hours、TLE 和 link params 返回 400；
+- 默认 HOST 是 `127.0.0.1`；
+- WS payload 与请求频率受限。
+
+## 9. 最终静态审计
+
+静态搜索旧 MAT 导入函数、文件名握手、把 SNR 当路径损耗以及从噪声底反推 C/N0 的模式；这些模式不应再出现在实现中。
+
+```bash
+rg -n "legacy.*import|\\.mat|trajectory\\.csv" src README.md Validation_Guide.md
+```
+
+如果为了说明迁移而提到旧格式，必须明确写成“已移除”，不得存在可执行导入路径。

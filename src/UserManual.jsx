@@ -68,7 +68,7 @@ export default function UserManual({ onClose }) {
                             ['8', '校准数据格式规范'],
                             ['9', '物理常识验证模块'],
                             ['10', '图电一体化与联动展示'],
-                            ['11', 'RT CIR 导入与 A/B 对比'],
+                            ['11', 'MPDB RT 与统计模型比较'],
                             ['12', 'Dense 导出与轨迹生成']
                         ].map(([n, title]) => (
                             <div key={n} style={{ color: '#aaa' }}>
@@ -94,9 +94,9 @@ export default function UserManual({ onClose }) {
                             <tr><td style={tdStyle}>🛰️ 轨道配置</td><td style={tdStyle}>SGP4 实时轨道计算、TLE 输入、地面站配置</td></tr>
                             <tr><td style={tdStyle}>📊 链路预算</td><td style={tdStyle}>大气衰减（雨衰/气体/云雾）、Faraday 旋转、XPD</td></tr>
                             <tr><td style={tdStyle}>📡 信道仿真</td><td style={tdStyle}>时间序列生成、CIR 多径建模、快衰落（闪烁）</td></tr>
-                            <tr><td style={tdStyle}>🎯 地面校准</td><td style={tdStyle}>多参数 Gauss-Newton 优化、已知卫星参考库</td></tr>
+                            <tr><td style={tdStyle}>🎯 地面校准</td><td style={tdStyle}>带可辨识性诊断的有界参数估计、已知卫星参考库</td></tr>
                             <tr><td style={tdStyle}>🌦️ 天气同步</td><td style={tdStyle}>Open-Meteo API 实时/JSON 回放</td></tr>
-                            <tr><td style={tdStyle}>🔬 RT 对比</td><td style={tdStyle}>导入射线追踪 CIR，与原生模型 A/B 同轨迹对比</td></tr>
+                            <tr><td style={tdStyle}>🔬 RT 对比</td><td style={tdStyle}>导入 Lauraycs MPDB，与可复现统计 ensemble 比较相对 PDP</td></tr>
                             <tr><td style={tdStyle}>📦 Dense 导出</td><td style={tdStyle}>可配间隔/时长/起始的密集轨迹导出</td></tr>
                         </tbody>
                     </table>
@@ -168,7 +168,7 @@ export default function UserManual({ onClose }) {
                         按有效路径高度积分（h_O = 6 km，h_W = 2.1 km）。捕获 22.235 GHz 水蒸气共振峰。
                         标准大气下，30 GHz 气体衰减约 0.20 dB（仰角 45°）。
                     </div>
-                    <div style={tipStyle} style={{...tipStyle, marginTop: '8px'}}>
+                    <div style={{ ...tipStyle, marginTop: '8px' }}>
                         <strong>ITU-R P.840-8（云/雾衰减）</strong>：双 Debye 介电模型计算液态水特定衰减系数 K_l（温度相关），
                         柱状液水含量默认 L = 0.5 kg/m²（中纬度典型值）。
                         30 GHz、仰角 45° 下，中等云层衰减约 0.3–0.5 dB。
@@ -186,7 +186,7 @@ export default function UserManual({ onClose }) {
                         <li>点击 <span style={codeStyle}>🔍 Search Passes</span> 搜索可用过境</li>
                         <li>从列表中选择一个 Pass 时段</li>
                         <li>点击 <span style={codeStyle}>🚀 Generate Channel TimeSeries</span> 生成</li>
-                        <li>查看图表：Total Loss、C/N0、Elevation、CIR 等</li>
+                        <li>查看图表：Total Loss、SNR、Elevation、CIR/PDP 等</li>
                     </ol>
 
                     <h3 style={h3Style}>CIR（信道脉冲响应）</h3>
@@ -210,8 +210,8 @@ export default function UserManual({ onClose }) {
                 {/* 5. 地面测量校准系统 */}
                 <div style={sectionStyle}>
                     <h2 style={h2Style}>5. 地面测量校准系统 🎯</h2>
-                    <p>使用地面实测数据校正仿真模型的系统偏差。校准使用 <strong>Gauss-Newton</strong> 多参数优化算法，
-                        同时调整 5 个独立参数。</p>
+                    <p>使用地面实测数据校正仿真模型的系统偏差。校准器先根据测量类型判断参数是否可辨识，
+                        只估计有数据支撑的参数，其余参数保持 frozen 并返回结构化诊断。</p>
 
                     <h3 style={h3Style}>校准原理</h3>
                     <p>校准的目标是修正<strong>设备偏差</strong>和<strong>环境偏差</strong>，而非卫星本身的参数：</p>
@@ -267,14 +267,14 @@ export default function UserManual({ onClose }) {
                             <th style={thStyle}>方式</th><th style={thStyle}>卫星参数</th><th style={thStyle}>数据校验</th>
                         </tr></thead>
                         <tbody>
-                            <tr><td style={tdStyle}>已知卫星（库中选择或 JSON ID）</td><td style={tdStyle}>自动获取，参数完整</td><td style={tdStyle}>无需校验</td></tr>
-                            <tr><td style={tdStyle}>自定义卫星（JSON 对象）</td><td style={tdStyle}>用户必须提供</td><td style={tdStyle}>必填: freq, eirp, polarization, bandwidth</td></tr>
+                            <tr><td style={tdStyle}>已知卫星（库中选择或 JSON ID）</td><td style={tdStyle}>只覆盖库中明确提供的字段</td><td style={tdStyle}>记录频率、带宽和接收机参数来源</td></tr>
+                            <tr><td style={tdStyle}>自定义卫星（JSON 对象）</td><td style={tdStyle}>用户必须提供</td><td style={tdStyle}>必填: frequency_GHz, eirp_dBW, polarization, bandwidth_Hz</td></tr>
                         </tbody>
                     </table>
 
                     <div style={dangerStyle}>
-                        <strong>⛔ 自定义卫星必填字段：</strong>频率 (freq)、发射功率 (eirp)、极化 (polarization)、带宽 (bandwidth)。
-                        缺少任何一个字段将<strong>阻止校准</strong>——因为方程欠定，结果无参考价值。
+                        <strong>⛔ 自定义卫星必填字段：</strong>频率 (frequency_GHz)、发射功率 (eirp_dBW)、极化 (polarization)、带宽 (bandwidth_Hz)。
+                        需要绝对链路预算的每个测量点还必须给出 slantRange_km；系统不会回退到 GEO 距离。
                     </div>
                 </div>
 
@@ -446,43 +446,43 @@ export default function UserManual({ onClose }) {
 
                     <h3 style={h3Style}>主从双向联动 (CIR Viewer)</h3>
                     <ol style={{ paddingLeft: '20px', fontSize: '0.9em', lineHeight: '1.6' }}>
-                        <li><strong>ZIP 导入</strong>：将第三方软件跑出的 <code style={codeStyle}>.mat</code> CIR 结果文件与 <code style={codeStyle}>trajectory.csv</code> / <code style={codeStyle}>manifest.json</code> 放在同一个 ZIP 包中拖入。</li>
+                        <li><strong>MPDB 导入</strong>：一次选择 Lauraycs MPDB ZIP、base station JSON 和 terminal JSON；文件名不参与识别。</li>
                         <li><strong>空间锚点交互</strong>：点击上方 Skyplot（天空图）或 Ground Track（地面轨迹图）上的黄色节点，下方 CIR 面板会瞬间跳帧至对应的物理时刻。</li>
                         <li><strong>动态演进播放</strong>：点击 CIR 面板的 <span style={codeStyle}>▶ Play</span>，可按设定的 FPS 动态播放多径瀑布，上方天空图的光标也会同步移动，完美演绎从 NLOS 到 LOS 的传播剧变。</li>
                     </ol>
                 </div>
 
-                {/* 11. RT CIR 导入与 A/B 对比 */}
+                {/* 11. MPDB RT 与统计比较 */}
                 <div style={sectionStyle}>
-                    <h2 style={h2Style}>11. RT CIR 导入与 A/B 对比 🔬</h2>
-                    <p>支持导入外部射线追踪（Ray Tracing）引擎生成的 CIR 数据，与系统原生 3GPP/ITU 模型进行 A/B 对比。</p>
+                    <h2 style={h2Style}>11. MPDB RT 与统计模型比较 🔬</h2>
+                    <p>点击“加载 MPDB / RT 比较工具”，导入 Lauraycs 射线结果并与本仓库统计信道进行可复现比较。</p>
 
                     <h3 style={h3Style}>导入格式</h3>
-                    <p>将以下文件打包为 ZIP 后拖入 CIR 面板：</p>
+                    <p>同时选择以下三个文件；系统按内容识别角色，任意重命名不会影响导入：</p>
                     <table style={tableStyle}>
                         <thead><tr>
                             <th style={thStyle}>文件</th><th style={thStyle}>格式</th><th style={thStyle}>说明</th>
                         </tr></thead>
                         <tbody>
-                            <tr><td style={tdStyle}><code>frame_*.mat</code></td><td style={tdStyle}>MATLAB .mat</td><td style={tdStyle}>每帧包含 RaysProperties 和 NumberRays</td></tr>
-                            <tr><td style={tdStyle}><code>trajectory.csv</code></td><td style={tdStyle}>CSV</td><td style={tdStyle}>每帧对应的卫星位置（el/az/range/time）</td></tr>
-                            <tr><td style={tdStyle}><code>manifest.json</code></td><td style={tdStyle}>JSON</td><td style={tdStyle}>可选: 卫星TLE、地面站坐标、任务ID</td></tr>
+                            <tr><td style={tdStyle}>MPDB ZIP</td><td style={tdStyle}>PyTorch ZIP / Pickle 2</td><td style={tdStyle}>列式射线、frame ID、复系数、时延、角度与坐标</td></tr>
+                            <tr><td style={tdStyle}>base station config</td><td style={tdStyle}>JSON</td><td style={tdStyle}>卫星轨迹、发射机、天线、功率和仿真时间窗</td></tr>
+                            <tr><td style={tdStyle}>terminal config</td><td style={tdStyle}>JSON</td><td style={tdStyle}>静态地面候选、接收机、天线和带宽</td></tr>
                         </tbody>
                     </table>
 
-                    <h3 style={h3Style}>A/B 对比机制</h3>
-                    <p>点击 <span style={codeStyle}>🚀 Generate</span> 时，如果已导入 RT CIR，系统会：</p>
+                    <h3 style={h3Style}>比较机制</h3>
                     <ol style={{ paddingLeft: '20px', fontSize: '0.9em' }}>
-                        <li><strong>使用相同轨迹</strong>：直接取导入帧的 el/az/range 几何参数（不做 SGP4 重算），确保两种 CIR 在完全相同的卫星位置下生成</li>
-                        <li><strong>原生 CIR 画布</strong>：显示 FSPL、Rx、SNR、DS、Bc、Doppler</li>
-                        <li><strong>RT CIR 画布</strong>：显示 RT PathLoss 和实际多径结构</li>
-                        <li>通过 <span style={codeStyle}>🔄 Native CIR / RT CIR</span> 按钮在两个视图间切换</li>
+                        <li>用户必须显式选择一个静态 ground frame，frame 0 也是合法选择。</li>
+                        <li>通过 scenarioId、frameId 和 frameOffsets 关联，不再依赖文件名。</li>
+                        <li>地面位置按容差标记 exact/approximate，默认只汇总 exact。</li>
+                        <li>统计模型默认运行 32 次确定性 realization，输出中位数、P5 和 P95。</li>
+                        <li>PDP 以最早路径为零点，10 ns 分箱，同一 bin 内复振幅相干聚合。</li>
                     </ol>
 
                     <div style={warnStyle}>
-                        <strong>⚠️ 轨迹一致性：</strong>RT 数据可能使用不同于当前 TLE 的卫星轨道。
-                        系统会自动从 <code style={codeStyle}>trajectory.csv</code> 提取精确几何参数，
-                        绕过 SGP4 传播，避免因卫星不同导致仰角/斜距错误。
+                        <strong>⚠️ 绝对功率不可用：</strong>MPDB 的复系数 H 没有可追溯的绝对归一化，
+                        因此 RT 接收功率、SNR 和 path loss 返回 UNDEFINED_H_NORMALIZATION，不做常数偏移伪造。
+                        旧 .mat / trajectory.csv / frame 文件名握手已移除。
                     </div>
                 </div>
 
@@ -537,7 +537,7 @@ export default function UserManual({ onClose }) {
 
                 {/* Footer */}
                 <div style={{ textAlign: 'center', padding: '10px', color: '#555', fontSize: '0.8em', borderTop: '1px solid rgba(255,255,255,0.05)', marginTop: '10px' }}>
-                    Satellite Channel Propagation Simulator v2.2 | RT CIR A/B 对比 + Dense 导出增强 2026-03
+                    Satellite Channel Simulator | UnifiedScenario v3 + Lauraycs MPDB comparison
                 </div>
             </div>
         </div>

@@ -1,18 +1,24 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { lazy, Suspense, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, BarController, Title, Tooltip, Legend, ScatterController } from 'chart.js';
 import { Line } from 'react-chartjs-2';
-import JSZip from 'jszip';
 import './App.css';
-import { calculateLinkBudget, calculateMIMOCapacity, calculateDynamicOrbit, predictPasses, computeGroundTrack, computeSkyTrack, generatePassReplay, generateTrajectoryExport, extractGoldenTrajectory } from './model';
-import ChannelSimPanel from './ChannelSimPanel';
-import UserManual from './UserManual';
-import ApiDashboard from './panels/ApiDashboard';
-import { buildSimulationProjectManifest, buildTrajectoryCsv } from './projectSync';
+import { calculateLinkBudget, calculateMIMOCapacity, calculateDynamicOrbit, predictPasses, computeGroundTrack, computeSkyTrack, generatePassReplay } from './model';
 import { ORBIT_SATELLITES } from './knownSatellites.js';
 import { diagnoseTleAge } from './orbit/tle.js';
 import { useChannelReplay } from './features/replay/useChannelReplay.js';
+import HistoricalReplayPanel from './features/replay/HistoricalReplayPanel.jsx';
+import { downloadReplayCsv } from './features/replay/replayExport.js';
+import {
+  createGoldenProjectExport,
+  createWgs84ProjectExport,
+  downloadProjectArtifact,
+} from './features/project-export/exportSimulationProject.js';
 import { appendBounded } from './replay/boundedSeries.js';
 import { deriveOpenMeteoSample } from './replay/weatherSample.js';
+
+const ChannelSimPanel = lazy(() => import('./ChannelSimPanel.jsx'));
+const UserManual = lazy(() => import('./UserManual.jsx'));
+const ApiDashboard = lazy(() => import('./panels/ApiDashboard.jsx'));
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, BarController, Title, Tooltip, Legend, ScatterController);
 ChartJS.defaults.color = 'rgba(0, 229, 255, 0.7)';
@@ -444,10 +450,6 @@ function App() {
     onFrame: handleOrbitReplayFrame,
     defaultSpeed: 5,
   });
-  const replayTimeline = orbitReplay.frames;
-  const replayIdx = orbitReplay.index;
-  const isReplaying = orbitReplay.isPlaying;
-  const replaySpeed = orbitReplay.speed;
   const [replayMinutesAhead, setReplayMinutesAhead] = useState(20);
   const [replayStartTime, setReplayStartTime] = useState(() => {
     const tzOffset = (new Date()).getTimezoneOffset() * 60000;
@@ -465,185 +467,42 @@ function App() {
   }
 
   function handleExportReplay() {
-    if (replayTimeline.length === 0) return;
-    const csv = 'Time,Elevation,Azimuth,SlantRange_km,TotalLoss_dB,DeltaFSPL_dB,AtmLoss_dB,SkyNoise_K\n' +
-      replayTimeline.map(f => `${f.timeLabel},${f.elevation.toFixed(2)},${f.azimuth.toFixed(1)},${f.slantRange.toFixed(1)},${f.totalLoss.toFixed(2)},${f.deltaFspl.toFixed(2)},${f.totalAtmosphericLoss.toFixed(2)},${f.tSky.toFixed(1)}`).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `replay_${satName || 'sat'}_${new Date().toISOString().slice(0, 16)}.csv`; a.click();
-    URL.revokeObjectURL(url);
+    downloadReplayCsv(orbitReplay.frames, satName);
   }
 
   async function handleExportWgs84Trajectory() {
-    // Determine start time
-    let startTime;
-    if (denseStartTimeStr && denseStartTimeStr.trim()) {
-      startTime = new Date(denseStartTimeStr.trim());
-      if (isNaN(startTime.getTime())) startTime = new Date();
-    } else {
-      startTime = new Date();
+    try {
+      const artifact = await createWgs84ProjectExport({
+        satellite: { name: satName, noradId, tleLine1, tleLine2, params },
+        groundStation: { lat: syncLat, lon: syncLon, alt: gsAlt },
+        startTimeText: denseStartTimeStr,
+        durationMinutes: denseDurationMin,
+        stepMs: denseStepMs,
+        linkParams: { disableFastFading, syncMode },
+      });
+      downloadProjectArtifact(artifact);
+      setActiveProjectManifest(artifact.manifest);
+      setTleFetchError('');
+    } catch (error) {
+      setTleFetchError(error.message);
     }
-
-    // Determine duration
-    let durationMs;
-    if (denseDurationMin > 0) {
-      durationMs = denseDurationMin * 60 * 1000;
-    } else {
-      // Auto: find next pass and use its duration
-      const passes = predictPasses(tleLine1, tleLine2, syncLat, syncLon, gsAlt, 72, 0);
-      if (passes && passes.length > 0) {
-        const best = passes.reduce((a, b) => b.maxElev > a.maxElev ? b : a, passes[0]);
-        startTime = new Date(best.aos.getTime() - 2 * 60000);
-        const endTime = new Date(best.los.getTime() + 2 * 60000);
-        durationMs = endTime.getTime() - startTime.getTime();
-      } else {
-        durationMs = 10 * 60 * 1000; // fallback 10 min
-      }
-    }
-
-    const trajectoryConfig = { startTime, durationMs, stepMs: denseStepMs };
-    const trajectory = generateTrajectoryExport(tleLine1, tleLine2, syncLat, syncLon, gsAlt, trajectoryConfig);
-    if (!trajectory.length) {
-      setTleFetchError('Failed to export WGS84 trajectory. Please verify the current TLE lines.');
-      return;
-    }
-
-    const safeSat = (satName || noradId || 'satellite').replace(/[^a-zA-Z0-9._-]+/g, '_');
-    const fileStamp = startTime.toISOString().replace(/:/g, '-').slice(0, 19);
-    const manifest = buildSimulationProjectManifest({
-      satellite: {
-        name: satName,
-        noradId,
-        tleLine1,
-        tleLine2,
-        params: { ...params }
-      },
-      groundStation: { lat: syncLat, lon: syncLon, alt: gsAlt },
-      trajectory: {
-        file: 'trajectory.csv',
-        startTime: startTime.toISOString(),
-        durationMs: trajectoryConfig.durationMs,
-        stepMs: trajectoryConfig.stepMs,
-        sampleCount: trajectory.length
-      },
-      linkParams: {
-        disableFastFading,
-        syncMode
-      }
-    });
-    const zip = new JSZip();
-    zip.file('trajectory.csv', buildTrajectoryCsv(trajectory));
-    zip.file('manifest.json', JSON.stringify(manifest, null, 2));
-    const blob = await zip.generateAsync({ type: 'blob' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${safeSat}_simulation_project_${fileStamp}.zip`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    setActiveProjectManifest(manifest);
-    setTleFetchError('');
   }
   async function handleExportGoldenTrajectory(specificPass = null) {
-    // If the click event object is passed by mistake instead of a pass object, ignore it
-    const isValidPass = specificPass && specificPass.aos && specificPass.los;
-    let bestPass = isValidPass ? specificPass : null;
-    
-    if (!bestPass) {
-      // 1. Predict passes to find the exact next visible window (up to 72 hours ahead)
-      const passes = predictPasses(tleLine1, tleLine2, syncLat, syncLon, gsAlt, 72, 0);
-      if (!passes || passes.length === 0) {
-        setTleFetchError('No visible passes found in the next 72h. Cannot generate Golden RT trajectory.');
-        return;
-      }
-      
-      // Find the "best" pass (the one with the highest max elevation) to ensure a full NLOS->LOS->NLOS curve
-      bestPass = passes[0];
-      for (let i = 1; i < passes.length; i++) {
-        if (passes[i].maxElev > bestPass.maxElev) {
-          bestPass = passes[i];
-        }
-      }
+    try {
+      const artifact = await createGoldenProjectExport({
+        satellite: { name: satName, noradId, tleLine1, tleLine2, params },
+        groundStation: { lat: syncLat, lon: syncLon, alt: gsAlt },
+        linkParams: { disableFastFading, syncMode },
+        specificPass,
+        streetAzimuth,
+        applyEffectiveAltitude: applyEffectiveAlt,
+      });
+      downloadProjectArtifact(artifact);
+      setActiveProjectManifest(artifact.manifest);
+      setTleFetchError('');
+    } catch (error) {
+      setTleFetchError(error.message);
     }
-    
-    // Add a 2-minute margin before AOS and after LOS to capture horizon edge effects
-    const startTime = new Date(bestPass.aos.getTime() - 2 * 60 * 1000);
-    const endTime = new Date(bestPass.los.getTime() + 2 * 60 * 1000);
-    const durationMs = endTime.getTime() - startTime.getTime();
-
-    // 2. Use a dense trajectory with 1s step for this specific dynamic window
-    const trajectoryConfig = { startTime, durationMs, stepMs: 1000 };
-    const denseTrajectory = generateTrajectoryExport(tleLine1, tleLine2, syncLat, syncLon, gsAlt, trajectoryConfig);
-    if (!denseTrajectory || !denseTrajectory.length) {
-      setTleFetchError('Failed to generate dense trajectory for RT Golden Export. Check TLE.');
-      return;
-    }
-
-    const goldenPoints = extractGoldenTrajectory(denseTrajectory, streetAzimuth);
-    if (!goldenPoints || !goldenPoints.length) {
-      setTleFetchError('Failed to extract golden points. Maybe satellite never visible?');
-      return;
-    }
-
-    const safeSat = (satName || noradId || 'satellite').replace(/[^a-zA-Z0-9._-]+/g, '_');
-    const fileStamp = startTime.toISOString().replace(/:/g, '-').slice(0, 19);
-    
-    // Create manifest marking this as a Golden RT Trajectory
-    const manifest = buildSimulationProjectManifest({
-      satellite: {
-        name: satName,
-        noradId,
-        tleLine1,
-        tleLine2,
-        params: { ...params }
-      },
-      groundStation: { lat: syncLat, lon: syncLon, alt: gsAlt },
-      trajectory: {
-        file: 'trajectory.csv',
-        startTime: startTime.toISOString(),
-        durationMs: trajectoryConfig.durationMs,
-        stepMs: trajectoryConfig.stepMs,
-        sampleCount: goldenPoints.length,
-        type: 'golden_rt',
-        streetAzimuth: streetAzimuth
-      },
-      linkParams: {
-        disableFastFading,
-        syncMode
-      }
-    });
-
-    const zip = new JSZip();
-    
-    // Add feature/description columns to the CSV, plus the new Effective Altitude
-    const csvHeader = 'Timestamp,Latitude (deg),Longitude (deg),Altitude (km),Azimuth (deg),Elevation (deg),Slant Range (km),Effective Altitude (km),Feature,Description\n';
-    const csvRows = goldenPoints.map(p => {
-      const ts = p.time || p.timestamp || '';
-      // Effective Altitude = Slant Range * sin(Elevation)
-      // This is crucial to "trick" local plane-based Ray Tracing engines into calculating the correct absolute delay and FSPL
-      const elevRad = Math.max(0, p.elevation || 0) * Math.PI / 180;
-      const effectiveAlt = (p.range || 0) * Math.sin(elevRad);
-      
-      const exportedAlt = applyEffectiveAlt ? effectiveAlt.toFixed(3) : (p.satAlt || 0).toFixed(3);
-      
-      return `${ts},${(p.satLat||0).toFixed(6)},${(p.satLon||0).toFixed(6)},${exportedAlt},${(p.azimuth||0).toFixed(2)},${(p.elevation||0).toFixed(2)},${(p.range||0).toFixed(2)},${effectiveAlt.toFixed(3)},"${p.feature||''}","${p.description||''}"`;
-    });
-    zip.file('trajectory.csv', csvHeader + csvRows.join('\n'));
-    zip.file('manifest.json', JSON.stringify(manifest, null, 2));
-    
-    const blob = await zip.generateAsync({ type: 'blob' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${safeSat}_GoldenRT_${fileStamp}.zip`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    setActiveProjectManifest(manifest);
-    setTleFetchError('');
   }
 
   const [satName, setSatName] = useState('ISS (ZARYA)');
@@ -1294,116 +1153,33 @@ function App() {
       </div>
 
       {/* === 信道传播仿真面板 === */}
-      <ChannelSimPanel
-        tleLine1={tleLine1}
-        tleLine2={tleLine2}
-        satName={satName}
-        globalParams={params}
-        groundStation={{ lat: syncLat, lon: syncLon, alt: gsAlt }}
-        onGroundStationChange={handleChannelGroundStationChange}
-        onLinkParamsChange={nextParams => setParams(prev => ({ ...prev, ...nextParams }))}
-        activeProjectManifest={activeProjectManifest}
-        requestedCirIndex={requestedCirIndex}
-        onCirSyncStateChange={handleCirSyncStateChange}
-      />
+      <Suspense fallback={<div className="card">正在加载信道仿真模块…</div>}>
+        <ChannelSimPanel
+          tleLine1={tleLine1}
+          tleLine2={tleLine2}
+          satName={satName}
+          globalParams={params}
+          groundStation={{ lat: syncLat, lon: syncLon, alt: gsAlt }}
+          onGroundStationChange={handleChannelGroundStationChange}
+          onLinkParamsChange={nextParams => setParams(prev => ({ ...prev, ...nextParams }))}
+          activeProjectManifest={activeProjectManifest}
+          requestedCirIndex={requestedCirIndex}
+          onCirSyncStateChange={handleCirSyncStateChange}
+        />
+      </Suspense>
 
 
       {/* Milestone 23: Historical Replay Panel */}
       {isDynamicOrbit && (
-        <div style={{ padding: '15px', border: '1px solid #555', borderRadius: '5px', marginBottom: '20px', background: '#1a1a2e', color: '#eee', textAlign: 'left' }}>
-          <h3 style={{ margin: '0 0 10px 0' }}>⏱️ Historical Replay & Channel Analysis</h3>
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '10px' }}>
-            <label>Start Time:
-              <input type="datetime-local" value={replayStartTime} onChange={e => setReplayStartTime(e.target.value)} style={{ marginLeft: '4px' }} />
-            </label>
-            <label>Duration (min):
-              <input type="number" min="5" max="120" value={replayMinutesAhead} onChange={e => setReplayMinutesAhead(parseInt(e.target.value) || 20)} style={{ width: '50px', marginLeft: '4px' }} />
-            </label>
-            <button onClick={handleGenerateReplay} style={{ padding: '4px 12px', background: '#6f42c1', color: 'white', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}>
-              📊 Generate Timeline
-            </button>
-            {replayTimeline.length > 0 && (
-              <>
-                <button onClick={() => isReplaying ? orbitReplay.stop() : orbitReplay.start()} style={{ padding: '4px 12px', background: isReplaying ? '#dc3545' : '#28a745', color: 'white', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}>
-                  {isReplaying ? '⏸ Pause' : '▶️ Play'}
-                </button>
-                <label style={{ fontSize: '0.85em' }}>Speed:
-                  <select value={replaySpeed} onChange={e => orbitReplay.setSpeed(parseInt(e.target.value))} style={{ marginLeft: '4px' }}>
-                    <option value={1}>1x</option>
-                    <option value={2}>2x</option>
-                    <option value={5}>5x</option>
-                    <option value={10}>10x</option>
-                    <option value={20}>20x</option>
-                  </select>
-                </label>
-                <button onClick={handleExportReplay} style={{ padding: '4px 12px', background: '#17a2b8', color: 'white', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}>
-                  💾 Export CSV
-                </button>
-              </>
-            )}
-          </div>
-
-          {replayTimeline.length > 0 && (
-            <>
-              {/* Time scrub slider */}
-              <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '8px' }}>
-                <input type="range" min={0} max={replayTimeline.length - 1} value={replayIdx} onChange={e => orbitReplay.seek(parseInt(e.target.value))} style={{ flex: 1 }} />
-                <span style={{ fontFamily: 'monospace', fontSize: '0.85em', minWidth: '180px' }}>
-                  {replayTimeline[replayIdx]?.timeLabel} | El: {replayTimeline[replayIdx]?.elevation.toFixed(1)}° | Loss: {replayTimeline[replayIdx]?.totalLoss.toFixed(1)}dB
-                </span>
-              </div>
-
-              {/* Dual-axis Chart: Elevation + Total Loss vs Time */}
-              <div style={{ background: 'rgba(0,0,0,0.3)', borderRadius: '5px', padding: '10px' }}>
-                <Line
-                  data={{
-                    labels: replayTimeline.map(f => f.timeLabel),
-                    datasets: [
-                      {
-                        label: 'Elevation (°)',
-                        data: replayTimeline.map(f => f.elevation),
-                        borderColor: '#28a745',
-                        backgroundColor: 'rgba(40,167,69,0.1)',
-                        fill: true,
-                        yAxisID: 'y1',
-                        tension: 0.3,
-                        pointRadius: 0
-                      },
-                      {
-                        label: 'Total Path Loss (dB)',
-                        data: replayTimeline.map(f => f.totalLoss),
-                        borderColor: '#dc3545',
-                        yAxisID: 'y2',
-                        tension: 0.3,
-                        pointRadius: 0
-                      },
-                      {
-                        label: 'FSPL Δ (dB)',
-                        data: replayTimeline.map(f => f.deltaFspl),
-                        borderColor: '#00e5ff',
-                        borderDash: [5, 3],
-                        yAxisID: 'y2',
-                        tension: 0.3,
-                        pointRadius: 0
-                      }
-                    ]
-                  }}
-                  options={{
-                    responsive: true,
-                    interaction: { mode: 'index', intersect: false },
-                    plugins: { legend: { position: 'top', labels: { color: '#ccc', font: { size: 11 } } }, title: { display: true, text: '⏱️ Replay: Elevation & Channel Loss vs Time', color: '#fff', font: { size: 13 } } },
-                    scales: {
-                      x: { display: true, title: { display: true, text: 'Time', color: '#ccc' }, ticks: { maxTicksLimit: 12, color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.05)' } },
-                      y1: { type: 'linear', position: 'left', title: { display: true, text: 'Elevation (°)', color: '#ccc' }, grid: { drawOnChartArea: false }, ticks: { color: '#aaa' } },
-                      y2: { type: 'linear', position: 'right', title: { display: true, text: 'Loss (dB)', color: '#ccc' }, grid: { color: 'rgba(255,255,255,0.08)' }, ticks: { color: '#aaa' } }
-                    }
-                  }}
-                />
-              </div>
-              <small style={{ color: '#888', marginTop: '4px', display: 'block' }}>{replayTimeline.length} frames | 10s/frame | {replayMinutesAhead} min window</small>
-            </>
-          )}
-        </div>
+        <HistoricalReplayPanel
+          replay={orbitReplay}
+          startTime={replayStartTime}
+          onStartTimeChange={setReplayStartTime}
+          minutesAhead={replayMinutesAhead}
+          onMinutesAheadChange={setReplayMinutesAhead}
+          onGenerate={handleGenerateReplay}
+          onExport={handleExportReplay}
+        />
       )}
       <div className="controls">
         <label>
@@ -1558,8 +1334,10 @@ function App() {
       </div>
 
       {/* === 使用手册浮层 === */}
-      {showManual && <UserManual onClose={() => setShowManual(false)} />}
-      {showApiDashboard && <ApiDashboard />}
+      <Suspense fallback={null}>
+        {showManual && <UserManual onClose={() => setShowManual(false)} />}
+        {showApiDashboard && <ApiDashboard />}
+      </Suspense>
 
     </div>
   );

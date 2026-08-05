@@ -1,6 +1,11 @@
 import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
 import { importMpdbBundle } from '../src/importers/mpdb/importMpdbBundle.js';
+import {
+  assertExpectedMpdbSample,
+  buildMismatchedConfigFiles,
+  renameSampleFiles,
+} from './mpdbSampleVerification.js';
 
 const paths = process.argv.slice(2);
 if (paths.length !== 3) {
@@ -12,14 +17,29 @@ if (paths.length !== 3) {
     data: new Uint8Array(await readFile(path)),
   })));
   const scenario = await importMpdbBundle(files);
-  const checks = [
-    [scenario.time.frameCount === 179, `frameCount=${scenario.time.frameCount}, expected 179`],
-    [scenario.rayTracing.delay_s.length === 465_512, `rayCount=${scenario.rayTracing.delay_s.length}, expected 465512`],
-    [scenario.carrier.frequency_Hz === 24_950_000_000, `frequency_Hz=${scenario.carrier.frequency_Hz}, expected 24950000000`],
-    [scenario.coordinateReference.alignmentRmsResidual_m < 0.05, `alignmentRmsResidual_m=${scenario.coordinateReference.alignmentRmsResidual_m}, expected < 0.05`],
-  ];
-  const failed = checks.find(([passed]) => !passed);
-  if (failed) throw new Error(`MPDB 样本验收失败: ${failed[1]}`);
+  assertExpectedMpdbSample(scenario);
+
+  const renamedScenario = await importMpdbBundle(renameSampleFiles(files));
+  assertExpectedMpdbSample(renamedScenario);
+  if (renamedScenario.scenarioId !== scenario.scenarioId) {
+    throw new Error('MPDB 样本验收失败: 文件改名后 scenarioId 发生变化');
+  }
+
+  let mismatchedError = null;
+  try {
+    await importMpdbBundle(buildMismatchedConfigFiles(files));
+  } catch (error) {
+    mismatchedError = error;
+  }
+  if (!mismatchedError) {
+    throw new Error('MPDB 样本验收失败: 不一致的收发端配置未被拒绝');
+  }
+  if (mismatchedError.code !== 'CONFIG_SIMULATION_WINDOW_MISMATCH') {
+    throw new Error(
+      `MPDB 样本验收失败: 配置不一致返回 ${mismatchedError.code ?? mismatchedError.name}`,
+    );
+  }
+
   const report = {
     scenarioId: scenario.scenarioId,
     frameCount: scenario.time.frameCount,
@@ -31,6 +51,14 @@ if (paths.length !== 3) {
     groundCandidateCount: scenario.groundCandidates.length,
     groundSelection: scenario.groundSelection,
     warnings: scenario.diagnostics.warnings,
+    renamedImport: {
+      status: 'passed',
+      scenarioIdStable: true,
+    },
+    mismatchedConfig: {
+      status: 'rejected',
+      code: mismatchedError.code,
+    },
   };
   console.log(JSON.stringify(report, null, 2));
 }
