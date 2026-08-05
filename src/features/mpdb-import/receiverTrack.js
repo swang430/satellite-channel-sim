@@ -1,6 +1,7 @@
 import { DomainValidationError } from '../../domain/validation.js';
 
 const DEFAULT_STATIONARY_THRESHOLD_M = 0.1;
+const MAX_FLOAT_COMPARISON_TOLERANCE_M = 1e-7;
 
 function invalidReceiverTrack(message) {
   throw new DomainValidationError('RECEIVER_TRACK_INVALID', message);
@@ -37,6 +38,23 @@ function displacementBetween(left, right) {
   );
 }
 
+function isWithinStationaryThreshold(displacement_m, left, right, stationaryThreshold_m) {
+  const coordinateScale_m = Math.max(
+    1,
+    ...['x', 'y', 'z'].flatMap((axis) => [
+      Math.abs(left.projectedPosition_m[axis]),
+      Math.abs(right.projectedPosition_m[axis]),
+    ]),
+  );
+  // Subtracting projected coordinates loses precision in proportion to their magnitude.
+  // Cap that machine-error allowance well below a meaningful millimetre-scale movement.
+  const comparisonTolerance_m = Math.min(
+    MAX_FLOAT_COMPARISON_TOLERANCE_M,
+    Number.EPSILON * coordinateScale_m * 8,
+  );
+  return displacement_m <= stationaryThreshold_m + comparisonTolerance_m;
+}
+
 function validateFrameIndex(track, frameIndex) {
   if (!Number.isInteger(frameIndex) || frameIndex < 0 || frameIndex >= track.length) {
     invalidReceiverTrack('Receiver frame index must identify a frame in the track');
@@ -56,7 +74,12 @@ export function receiverMotionAt(track, frameIndex, {
 
   const displacement_m = displacementBetween(track[frameIndex - 1], track[frameIndex]);
   return {
-    state: displacement_m <= stationaryThreshold_m ? 'stationary' : 'moving',
+    state: isWithinStationaryThreshold(
+      displacement_m,
+      track[frameIndex - 1],
+      track[frameIndex],
+      stationaryThreshold_m,
+    ) ? 'stationary' : 'moving',
     displacement_m,
   };
 }
@@ -74,7 +97,12 @@ export function summarizeReceiverTrack(track, {
   for (let frameIndex = 1; frameIndex < track.length; frameIndex += 1) {
     const displacement_m = displacementBetween(track[frameIndex - 1], track[frameIndex]);
     totalDistance_m += displacement_m;
-    if (displacement_m <= stationaryThreshold_m) {
+    if (isWithinStationaryThreshold(
+      displacement_m,
+      track[frameIndex - 1],
+      track[frameIndex],
+      stationaryThreshold_m,
+    )) {
       stationaryFrameCount += 1;
     } else {
       movingFrameCount += 1;

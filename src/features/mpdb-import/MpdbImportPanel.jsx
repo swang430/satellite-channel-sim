@@ -44,8 +44,12 @@ export default function MpdbImportPanel({ onScenarioChange }) {
   const [uiError, setUiError] = useState('');
   const workerRef = useRef(null);
   const requestIdRef = useRef(null);
+  const onScenarioChangeRef = useRef(onScenarioChange);
 
   useEffect(() => () => workerRef.current?.terminate(), []);
+  useEffect(() => {
+    onScenarioChangeRef.current = onScenarioChange;
+  }, [onScenarioChange]);
 
   const receiverTrackSummary = useMemo(
     () => (scenario ? summarizeReceiverTrack(scenario.receiver.track) : null),
@@ -77,7 +81,7 @@ export default function MpdbImportPanel({ onScenarioChange }) {
       if (data.type === 'READY') {
         setImportState((previous) => transitionImportState(previous, data));
         setScenario(data.scenario);
-        onScenarioChange?.(data.scenario);
+        onScenarioChangeRef.current?.(data.scenario);
         return;
       }
       setImportState((previous) => transitionImportState(previous, data));

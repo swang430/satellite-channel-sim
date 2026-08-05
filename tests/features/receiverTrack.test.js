@@ -12,6 +12,13 @@ function receiverTrack() {
   ];
 }
 
+function twoPointTrack(startX_m, endX_m) {
+  return [
+    { frameId: 0, projectedPosition_m: { x: startX_m, y: 0, z: 0 } },
+    { frameId: 1, projectedPosition_m: { x: endX_m, y: 0, z: 0 } },
+  ];
+}
+
 describe('MPDB receiver track motion', () => {
   it('classifies initial, moving, and stationary frames', () => {
     const track = receiverTrack();
@@ -45,6 +52,41 @@ describe('MPDB receiver track motion', () => {
     expect(receiverMotionAt(receiverTrack(), 1, { stationaryThreshold_m: 1 })).toEqual({
       state: 'stationary',
       displacement_m: 1,
+    });
+  });
+
+  it.each([
+    ['small coordinates', 1, 1.1],
+    ['large projected coordinates', 1_000_000, 1_000_000.1],
+  ])('stabilizes the 0.1 m threshold at %s', (_label, startX_m, endX_m) => {
+    const track = twoPointTrack(startX_m, endX_m);
+
+    expect(receiverMotionAt(track, 1)).toMatchObject({
+      state: 'stationary',
+      displacement_m: expect.closeTo(0.1),
+    });
+    expect(summarizeReceiverTrack(track)).toMatchObject({
+      movingFrameCount: 0,
+      stationaryFrameCount: 1,
+    });
+  });
+
+  it.each([1, 1_000_000])(
+    'does not hide a 0.1001 m displacement from coordinate origin %s',
+    (startX_m) => {
+      expect(receiverMotionAt(twoPointTrack(startX_m, startX_m + 0.1001), 1)).toMatchObject({
+        state: 'moving',
+        displacement_m: expect.closeTo(0.1001),
+      });
+    },
+  );
+
+  it('does not hide real movement when the threshold is zero', () => {
+    expect(receiverMotionAt(twoPointTrack(1, 1 + 1e-9), 1, {
+      stationaryThreshold_m: 0,
+    })).toMatchObject({
+      state: 'moving',
+      displacement_m: expect.closeTo(1e-9),
     });
   });
 
