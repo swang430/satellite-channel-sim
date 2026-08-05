@@ -40,7 +40,6 @@ export function createScenarioDraft(input = {}) {
     coordinateReference: input.coordinateReference ?? null,
     transmitter: input.transmitter ?? {},
     receiver: input.receiver ?? {},
-    groundSelection: input.groundSelection ?? null,
     geometry: input.geometry ?? null,
     rayTracing: input.rayTracing ?? null,
     diagnostics: input.diagnostics ?? { warnings: [], assumptions: [] },
@@ -101,49 +100,52 @@ export function validateScenario(scenario) {
     ));
   }
 
+  const receiverTrack = scenario.receiver?.track;
+  if (!Array.isArray(receiverTrack)
+    || receiverTrack.length !== scenario.time?.frameCount) {
+    issues.push(validationIssue(
+      'RECEIVER_TRACK_FRAME_COUNT_MISMATCH',
+      'receiver.track',
+      'receiver.track must contain exactly one point per scenario frame',
+    ));
+  }
+
+  if (Array.isArray(receiverTrack)) {
+    receiverTrack.forEach((point, frameId) => {
+      if (point?.frameId !== frameId) {
+        issues.push(validationIssue(
+          'RECEIVER_TRACK_FRAME_ID_MISMATCH',
+          `receiver.track[${frameId}].frameId`,
+          `Receiver track point ${frameId} must have frameId ${frameId}`,
+        ));
+      }
+
+      const coordinates = [
+        ['longitude_deg', point?.longitude_deg],
+        ['latitude_deg', point?.latitude_deg],
+        ['height_m', point?.height_m],
+        ['projectedPosition_m.x', point?.projectedPosition_m?.x],
+        ['projectedPosition_m.y', point?.projectedPosition_m?.y],
+        ['projectedPosition_m.z', point?.projectedPosition_m?.z],
+      ];
+      coordinates.forEach(([coordinatePath, value]) => {
+        if (!isFiniteNumber(value)) {
+          issues.push(validationIssue(
+            'INVALID_RECEIVER_TRACK_COORDINATE',
+            `receiver.track[${frameId}].${coordinatePath}`,
+            `Receiver track coordinate ${coordinatePath} must be finite`,
+          ));
+        }
+      });
+    });
+  }
+
   collectUnitlessPhysicalFields(scenario, '', issues);
   return issues;
 }
 
-export function normalizeGroundSelection(selection, frameCount) {
-  const selectedFrameId = selection?.selectedFrameId;
-  if (!Number.isInteger(selectedFrameId) || selectedFrameId < 0 || selectedFrameId >= frameCount) {
-    throw new DomainValidationError(
-      'GROUND_FRAME_OUT_OF_RANGE',
-      `selectedFrameId must be between 0 and ${frameCount - 1}`,
-    );
-  }
-  if (selection.selectedBy !== 'user') {
-    throw new DomainValidationError(
-      'GROUND_SELECTION_NOT_EXPLICIT',
-      'Ground selection must be explicitly confirmed by the user',
-    );
-  }
-  const matchTolerance_m = selection.matchTolerance_m ?? 0.1;
-  if (!isFiniteNumber(matchTolerance_m) || matchTolerance_m < 0) {
-    throw new DomainValidationError(
-      'INVALID_GROUND_MATCH_TOLERANCE',
-      'matchTolerance_m must be a finite non-negative number',
-    );
-  }
-
-  return {
-    selectedFrameId,
-    selectedBy: 'user',
-    selectedAtUtc: selection.selectedAtUtc ?? new Date().toISOString(),
-    matchTolerance_m,
-  };
-}
-
 export function assertScenarioReadyForComparison(scenario) {
   const issues = validateScenario(scenario);
-  if (!scenario?.groundSelection) {
-    issues.push(validationIssue(
-      'GROUND_FRAME_REQUIRED',
-      'groundSelection',
-      'Select and confirm a ground frame before comparison',
-    ));
-  }
 
   if (issues.length > 0) {
     throw new DomainValidationError(

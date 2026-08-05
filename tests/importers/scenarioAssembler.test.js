@@ -31,8 +31,17 @@ describe('MPDB scenario assembler', () => {
       z: 0,
     });
     expect(scenario.coordinateReference.alignmentRmsResidual_m).toBeLessThan(1e-6);
-    expect(scenario.groundSelection).toBeNull();
-    expect(scenario.groundCandidates).toHaveLength(2);
+    expect(scenario.receiver.track).toHaveLength(2);
+    expect(scenario.receiver.track[0]).toEqual(expect.objectContaining({
+      frameId: 0,
+      projectedPosition_m: expect.objectContaining({
+        x: expect.any(Number),
+        y: expect.any(Number),
+        z: expect.any(Number),
+      }),
+    }));
+    expect(scenario).not.toHaveProperty('groundSelection');
+    expect(scenario).not.toHaveProperty('groundCandidates');
     expect(scenario.diagnostics.warnings).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'CONFIG_FREQUENCY_CONFLICT' }),
     ]));

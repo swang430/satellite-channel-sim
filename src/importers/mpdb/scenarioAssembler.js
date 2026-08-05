@@ -82,19 +82,22 @@ function assertLinkIdentity(config, mpdb) {
   }
 }
 
-function buildGroundCandidates(mpdb, config, alignment) {
+function buildReceiverTrack(mpdb, config, alignment) {
   return Array.from({ length: mpdb.frameCount }, (_, frameId) => {
     const localPosition_m = readFlatPosition(mpdb.linkFrames.rxPosition_m, frameId);
     const projectedPosition_m = localToProjected(localPosition_m, alignment.localOrigin_m);
+    const geographicPosition = projectedToGeographic(
+      projectedPosition_m,
+      config.coordinateReference.projectedEpsg,
+    );
     return {
       frameId,
       timestampUtc: config.timestampsUtc[frameId],
       localPosition_m,
       projectedPosition_m,
-      ...projectedToGeographic(
-        projectedPosition_m,
-        config.coordinateReference.projectedEpsg,
-      ),
+      longitude_deg: geographicPosition.longitude_deg,
+      latitude_deg: geographicPosition.latitude_deg,
+      height_m: geographicPosition.altitude_m,
     };
   });
 }
@@ -135,7 +138,7 @@ export function assembleMpdbScenario({
       `Coordinate alignment max residual ${alignment.alignmentMaxResidual_m} m exceeds ${alignmentTolerance_m} m`,
     );
   }
-  const groundCandidates = buildGroundCandidates(mpdb, config, alignment);
+  const receiverTrack = buildReceiverTrack(mpdb, config, alignment);
 
   const scenario = createScenarioDraft({
     scenarioId,
@@ -154,8 +157,10 @@ export function assembleMpdbScenario({
       ...config.transmitter,
       track: config.satelliteTrack,
     },
-    receiver: config.receiver,
-    groundSelection: null,
+    receiver: {
+      ...config.receiver,
+      track: receiverTrack,
+    },
     geometry: {
       frameCount: mpdb.frameCount,
       txPosition_m: mpdb.linkFrames.txPosition_m,
@@ -167,7 +172,6 @@ export function assembleMpdbScenario({
       assumptions: config.diagnostics.assumptions,
     },
   });
-  scenario.groundCandidates = groundCandidates;
   scenario.linkFrames = mpdb.linkFrames;
 
   const issues = validateScenario(scenario);
