@@ -82,6 +82,20 @@ describe('UnifiedScenario v3', () => {
     ]));
   });
 
+  it('rejects a receiver track with a missing point in a length-correct sparse array', () => {
+    const track = receiverTrack();
+    delete track[1];
+
+    expect(validateScenario(validScenario({
+      receiver: { id: 'terminal-1', track },
+    }))).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'MISSING_RECEIVER_TRACK_POINT',
+        path: 'receiver.track[1]',
+      }),
+    ]));
+  });
+
   it.each([
     ['carrier.frequency_Hz', { carrier: { frequency_Hz: 0, bandwidth_Hz: 100_000_000 } }],
     ['carrier.bandwidth_Hz', { carrier: { frequency_Hz: 24_950_000_000, bandwidth_Hz: 0 } }],

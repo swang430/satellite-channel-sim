@@ -111,7 +111,17 @@ export function validateScenario(scenario) {
   }
 
   if (Array.isArray(receiverTrack)) {
-    receiverTrack.forEach((point, frameId) => {
+    for (let frameId = 0; frameId < receiverTrack.length; frameId += 1) {
+      const point = receiverTrack[frameId];
+      if (point === null || point === undefined) {
+        issues.push(validationIssue(
+          'MISSING_RECEIVER_TRACK_POINT',
+          `receiver.track[${frameId}]`,
+          `Receiver track point ${frameId} is required`,
+        ));
+        continue;
+      }
+
       if (point?.frameId !== frameId) {
         issues.push(validationIssue(
           'RECEIVER_TRACK_FRAME_ID_MISMATCH',
@@ -137,7 +147,7 @@ export function validateScenario(scenario) {
           ));
         }
       });
-    });
+    }
   }
 
   collectUnitlessPhysicalFields(scenario, '', issues);

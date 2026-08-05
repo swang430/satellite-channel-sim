@@ -34,12 +34,17 @@ describe('MPDB scenario assembler', () => {
     expect(scenario.receiver.track).toHaveLength(2);
     expect(scenario.receiver.track[0]).toEqual(expect.objectContaining({
       frameId: 0,
-      projectedPosition_m: expect.objectContaining({
-        x: expect.any(Number),
-        y: expect.any(Number),
-        z: expect.any(Number),
-      }),
+      localPosition_m: { x: -1_547, y: -313, z: -40 },
+      projectedPosition_m: { x: 358_453, y: 3_979_687, z: -40 },
+      altitude_m: -40,
     }));
+    expect(scenario.receiver.track[1]).toEqual(expect.objectContaining({
+      frameId: 1,
+      localPosition_m: { x: -1_547, y: -313, z: -40 },
+      projectedPosition_m: { x: 358_453, y: 3_979_687, z: -40 },
+      altitude_m: -40,
+    }));
+    expect(scenario.geometry.rxPosition_m).toEqual(mpdb.linkFrames.rxPosition_m);
     expect(scenario).not.toHaveProperty('groundSelection');
     expect(scenario).not.toHaveProperty('groundCandidates');
     expect(scenario.diagnostics.warnings).toEqual(expect.arrayContaining([
