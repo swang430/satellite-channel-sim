@@ -2,164 +2,210 @@
 
 ## 1. 背景
 
-现有系统已经能够在用户选择一个 MPDB RX frame 作为静态地面点后，使用 MPDB 卫星轨迹逐帧计算 RT PDP 与统计模型 PDP。`compareScenario` 默认对所有与静态点精确匹配的动态帧执行 32 次确定性统计 realization，并输出逐帧比较指标。
+现有系统可以解析 MPDB 的逐帧卫星位置、接收端位置和 RT 射线，也可以按指定几何生成统计 PDP。但是当前比较流程把用户选择的一个 RX frame 固定为地面点，只比较与该点距离小于容差的 RT 帧；主 CIR 播放器与 RT/统计比较面板也使用不同时间轴。
 
-当前缺口在展示层：主 CIR 播放器只消费独立生成的理论时间线；RT/统计比较面板只显示单帧静态图。两套视图使用独立滑块，无法直观看到同一 MPDB frame 下 RT 和统计 PDP 随卫星移动的拟合变化。
+真实样本揭示了这种假设的问题：卫星轨迹包含 179 帧，接收端在 frame 0–107 移动，在 frame 108–178 基本静止。如果强制选定一个固定点，大部分已有 RT 帧会因为接收端位置不同而失去可比性。
+
+产品最终选择完全跟随 MPDB 原始接收端轨迹。每个 frame 都使用该 frame 自己的发射端位置、接收端位置和 RT 射线；统计模型在同一几何上重算。若需要固定地面点，用户应从 Lauraycs 生成固定终端 MPDB 后再导入。
 
 ## 2. 目标与非目标
 
 ### 2.1 目标
 
-- 固定用户选择的地面位置，按 MPDB 卫星轨迹动态播放全部可比较帧。
-- 在同一个 PDP 坐标系、同一个 frameId 和同一个播放时钟上展示统计与 RT 结果。
+- 完整播放 MPDB 的全部 receiver/satellite 动态帧。
+- 每帧在完全相同的收发几何上比较 RT PDP 与统计 PDP。
+- 在同一 PDP 坐标系、同一个 frameId 和同一个播放时钟上展示两种结果。
 - 提供 `RT 叠加` 开关：关闭时只显示统计结果，开启时叠加 RT。
-- 逐帧展示拟合指标，并明确相对功率的物理边界。
-- 地面选择或场景 revision 改变时立即使旧报告失效。
+- 显示接收端当前坐标、帧间位移和移动/静止状态。
+- 明确相对 PDP 的物理边界，不伪造 RT 绝对功率。
 
 ### 2.2 非目标
 
-- 不从 MPDB `H` 推导 RT 绝对接收功率、SNR 或 path loss。
+- 不提供“把移动终端 MPDB 转换成固定终端 RT”的模式。
+- 不要求用户选择一个 ground frame 才能开始比较。
+- 不按位置容差排除 MPDB 原生帧，也不再使用 exact/approximate 作为默认比较分类。
+- 不从 MPDB `H` 推导 RT 接收功率、SNR 或 path loss。
 - 不通过最近时间、数组下标或文件名连接 RT 与统计帧。
-- 不把当前 UI 中自由运行的 TLE 时间线与 MPDB 时间线强行合并。
-- 不自动替用户选择静态地面 frame。
+- 不把自由运行的 TLE timeline 与 MPDB timeline 强行合并。
 
-## 3. 方案选择
+## 3. 帧级几何语义
 
-采用统一比较播放时间轴：运行比较后，将 comparison report 提升到 `ChannelSimPanel`，由主 CIR 区域中的专用比较播放器消费。
+每个比较帧由相同 `frameId` 的四类数据组成：
 
-未采用的方案：
+```text
+frameId
+├─ transmitter.track[frameId]         MPDB 配置卫星位置与时间
+├─ receiver.track[frameId]            MPDB RT 接收端位置
+├─ rayTracing.frameOffsets[frameId]    MPDB RT 射线范围
+└─ statistical ensemble               使用上述同帧收发几何重算
+```
 
-- 只在原比较面板增加第二个播放器：会保留两个独立时间轴，容易误读。
-- 将 RT 数据并入自由运行的 TLE timeline：TLE 时间窗可能与 MPDB 配置轨迹不一致，不能保证物理帧对齐。
+场景装配把旧的 `groundCandidates` 正式收敛为 `receiver.track`，并移除 `groundSelection`。`scenarioFrameGeometry` 逐帧读取 `receiver.track[frameId].projectedPosition_m`。由于 Scenario v3 尚未合并发布，这次破坏性调整直接成为最终 v3 契约，不额外保留过渡字段。因此：
 
-## 4. 物理与帧对齐语义
+- 接收端移动时，统计模型跟随移动；
+- 接收端位置不变时，统计模型自然保持固定；
+- RT 与统计模型始终使用同一 frame 的接收端位置；
+- 全部合法 MPDB frame 都进入比较，不需要位置近似。
 
-每个比较播放帧必须来自同一个 comparison report frame：
+comparison report 明确记录：
 
-- `frame.frameId` 是真实 MPDB frame ID；数组下标只用于播放器内部定位。
-- 时间戳来自 MPDB 配置中的发射端轨迹点。
-- 发射端位置来自 `scenario.transmitter.track[frameId]`。
-- 接收端位置始终来自 `scenario.groundSelection.projectedPosition_m`，不会随 frameId 改变。
-- RT PDP 来自该 frameId 对应的 `rayTracing.frameOffsets` 范围。
-- 统计 PDP 来自相同 frameId、相同几何和相同载频/带宽的确定性统计集合。
+```js
+receiverGeometry: {
+  mode: 'mpdb-track',
+  source: 'rayTracing.rxPosition',
+  frameCount: 179
+}
+```
 
-默认只播放 `exact` 帧。`approximate` 帧保留计数和诊断，但不进入默认拟合播放。
+统计模型使用当前 UI 的 environment、TEC 和已启用校准中的 scatter power offset。报告保存这些参数及稳定 request key；任一参数变化都会使旧报告失效，防止把不同理论条件下的结果继续叠加到 RT。
 
-RT 与统计 PDP 分别以各自最强 bin 归一化到 0 dB。叠加图只表达相对 PDP 形状、超额时延和动态变化；RT 绝对功率继续保持 `unavailable / UNDEFINED_H_NORMALIZATION`。
+## 4. 接收端运动状态
 
-## 5. 组件与状态流
+每帧记录与前一帧的接收端位移：
 
-### 5.1 `ChannelComparisonPanel`
+- 首帧：`initial`；
+- 位移小于等于 0.1 m：`stationary`；
+- 位移大于 0.1 m：`moving`。
 
-该组件继续负责：
+该状态只用于展示和诊断，不改变帧是否参与比较。0.1 m 是 UI 运动分类阈值，不是 RT/统计匹配容差。
+
+播放器显示：
+
+- 当前接收端经纬度和高度；
+- 帧间位移，m；
+- `移动`、`静止` 或 `初始帧`；
+- 卫星仰角和斜距。
+
+## 5. PDP 与拟合语义
+
+RT 与统计结果都使用统一 PDP 规则：
+
+- 每帧以最早路径为 excess-delay 零点；
+- 分箱宽度为 `1 / bandwidth`；
+- 同一 bin 内先对复振幅相干聚合，再计算功率。
+
+MPDB `H` 没有可追溯的绝对功率归一化，因此 RT 与统计 PDP 分别以各自最强 bin 归一化到 0 dB。叠加图只表达相对 PDP 形状、时延结构及其动态变化；RT 绝对功率继续保持：
+
+```text
+unavailable / UNDEFINED_H_NORMALIZATION
+```
+
+逐帧拟合指标包括：
+
+- Jensen–Shannon divergence；
+- RMS delay spread difference；
+- weighted delay distance。
+
+## 6. 组件与状态流
+
+### 6.1 `MpdbImportPanel`
+
+删除 ground frame slider、确认按钮和稳定帧建议。导入成功后展示 receiver track 摘要：
+
+- 总 frame 数；
+- 起点和终点坐标；
+- 累计移动距离；
+- moving/stationary frame 数；
+- 数据来源为 MPDB RX position。
+
+导入成功即满足比较的接收端几何条件。
+
+### 6.2 `ChannelComparisonPanel`
+
+继续负责：
 
 - 运行、取消 32-realization 比较；
 - 展示计算进度和报告摘要；
 - 通过 `onReportChange(report)` 向父级提交成功报告；
-- 在计算失败或场景失效时通过 `onReportChange(null)` 清除旧结果。
+- 在计算失败或场景替换时清除旧结果。
 
-原有单帧静态 PDP 图和独立 frame slider 删除，避免重复播放器。
+原有单帧静态 PDP 图和独立 slider 删除，避免两个播放器。
 
-### 5.2 `ChannelSimPanel`
+### 6.3 `ChannelSimPanel`
 
-新增 comparison report 状态。父级只接受同时满足以下条件的报告：
+持有 comparison report。父级只接受 scenarioId 和统计 request key 都匹配当前输入的报告；重新导入场景或修改 environment、TEC、校准散射偏移会停止播放、清除旧 report 并归零索引。
 
-- `report.scenarioId === scenario.scenarioId`；
-- `report.comparisonRevision === scenario.comparisonRevision`。
+存在有效 report 时，主 CIR 区域进入 MPDB 对齐比较模式；否则保持原自由运行统计 CIR 播放器。即使没有自由运行 timeline，只要 comparison report 已生成，也必须显示比较播放器。
 
-重新导入 MPDB、确认其他地面 frame 或 comparison revision 变化时：
+### 6.4 `PdpComparisonPlayer`
 
-- 停止比较播放；
-- 清除旧 report；
-- 将播放索引归零。
+专用播放器内部持有：
 
-输出区域在存在有效 comparison report 时渲染比较播放器；否则保持原理论 CIR 播放器。即使没有自由运行的理论 timeline，只要 comparison report 已生成，也必须显示比较播放器。
-
-### 5.3 `PdpComparisonPlayer`
-
-新增专用组件，输入为完整 comparison report，内部持有：
-
-- 当前报告数组下标；
+- 当前 report 数组位置；
 - 播放/暂停；
 - FPS；
-- `showRtOverlay`，报告首次就绪时默认为 `true`。
+- `showRtOverlay`，首次加载时默认 `true`。
 
-播放器循环遍历 `report.frames`，但 UI 始终显示真实 `frame.frameId` 和 UTC 时间。
+播放器按 report frame 顺序循环，但 UI 始终显示真实 MPDB `frameId` 和 UTC 时间。
 
-### 5.4 纯 View Model
+### 6.5 纯 View Model
 
-比较图数据由纯函数生成，负责：
+纯函数负责：
 
-- 将统计 median、P5、P95 转换为相对 dB；
-- 将 RT PDP bins 转换为相对 dB；
-- 根据 `showRtOverlay` 决定是否包含 RT dataset；
-- 生成当前 frame 的几何、拟合指标和计数摘要；
-- 对非有限值或空数据返回结构化错误，而不是交给图表静默处理。
+- median、P5、P95 和 RT PDP 的相对 dB 序列；
+- 根据 `showRtOverlay` 生成 dataset；
+- 真实 frameId、接收端运动状态、几何和拟合指标摘要；
+- 非有限或空图形数据的结构化拒绝。
 
-## 6. UI 设计
+## 7. UI 设计
 
-比较模式下 CIR 卡片标题为 `CIR — Power Delay Profile / RT Fit`，并显示：
+比较模式下主卡片标题为 `CIR — Power Delay Profile / RT Fit`，显示：
 
-- `MPDB 对齐 · 固定地面点 FRAME X`；
-- 播放/暂停按钮；
-- 1–60 FPS 输入；
-- 真实帧进度滑块；
+- `MPDB 对齐 · RX 跟随原始轨迹`；
+- 播放/暂停；
+- 1–60 FPS；
+- 完整 MPDB frame slider；
 - `RT 叠加` 开关。
 
 开关语义：
 
-- 关闭：统计中位 PDP 与 P5–P95 区间；
-- 开启：在上述统计结果上增加红色 RT PDP。
+- 关闭：统计中位 PDP 与 P5–P95；
+- 开启：在统计结果上增加红色 RT PDP。
 
-图形约定：
+颜色：
 
 - 青色实线：统计中位 PDP；
-- 青色半透明区域或上下边界：P5–P95；
-- 红色实线/点：RT 相对 PDP；
+- 青色半透明虚线：P5/P95；
+- 红色实线/点：RT 相对 PDP。
+
+坐标轴：
+
 - 横轴：`Excess Delay (ns)`；
 - 纵轴：`Relative Power (dB)`。
 
-当前帧展示：
+## 8. 领域边界与错误处理
 
-- UTC 时间、MPDB frameId；
-- 仰角与斜距；
-- Jensen–Shannon divergence；
-- RMS delay spread difference；
-- weighted delay distance；
-- 当前帧序号、exact 总数和 approximate 排除数。
-
-## 7. 错误与边界处理
-
-- 未确认静态地面 frame：禁用比较，不显示 RT 叠加开关。
-- 没有 exact 帧：返回 `COMPARISON_EXACT_FRAMES_EMPTY`，不生成空 report。
+- MPDB receiver position 数量必须等于 frameCount；否则拒绝装配或比较。
+- 缺失某 frame 的 RX 位置：`RECEIVER_TRACK_FRAME_MISSING`。
 - RT frame 无射线：保留 `RT_FRAME_EMPTY`。
 - frame offset 或 frameId 越界：保留结构化领域错误。
-- 统计或图形数据包含非有限值：拒绝生成该报告，而不是绘制错误曲线。
-- 报告与当前 scenarioId/revision 不匹配：视为 stale report 并丢弃。
-- 关闭或重新开启 RT 叠加只改变视图，不重新计算 comparison report。
+- 统计或图形数据包含非有限值：拒绝报告，不交给图表静默处理。
+- report 与当前 scenarioId 不匹配：视为 stale report。
+- RT 叠加开关只改变视图，不重新计算。
+- 固定终端数据无需特殊模式；若 MPDB 每帧 RX position 相同，播放器自然显示全程静止。
 
-## 8. 性能
+## 9. 性能
 
-- 比较仍由用户显式启动，不在选择地面 frame 后自动运行。
-- 继续使用逐帧 progress 与取消信号。
-- 播放只切换预计算 report frame，不在动画 tick 中重新运行统计模型或解析射线。
-- 图表关闭动画，避免高 FPS 下的补间累积。
-- 不复制完整 MPDB TypedArray 到播放器状态；播放器只持有 comparison report。
+- 比较由用户显式启动，不在导入后自动运行。
+- 保留逐帧进度和取消信号。
+- 播放只切换预计算 report，不在 tick 中重跑模型或解析射线。
+- 图表关闭动画。
+- 不复制完整 MPDB TypedArray 到播放器状态。
 
-## 9. 测试与验收
+## 10. 测试与验收
 
-自动化测试必须覆盖：
+自动化测试覆盖：
 
-1. 多个动态 frame 的 `receiverPosition_m` 始终等于用户选择的静态点，而 transmitter position 随 track 改变。
-2. 非连续 MPDB frameId 按 report 顺序播放且显示真实 ID。
-3. RT 开关关闭时无 RT dataset，开启时 RT 与统计来自同一 frame。
-4. median/P5/P95 正确转换为相对 dB。
-5. scenarioId 或 comparison revision 改变后旧报告失效。
-6. 无 exact 帧返回 `COMPARISON_EXACT_FRAMES_EMPTY`。
-7. 空 RT、越界 frame 和非有限图形数据返回结构化错误。
-8. 真实 MPDB 样本生成 179 个动态比较帧，逐帧拟合指标为有限值。
+1. 每个动态 frame 的 transmitter 与 receiver 都来自同 frame MPDB track。
+2. receiver 移动、静止和初始状态按帧间位移正确分类。
+3. 非连续 frameId 仍按 report 顺序播放并显示真实 ID。
+4. RT 开关关闭时无 RT dataset，开启时 RT 与统计来自同 frame。
+5. median/P5/P95 正确转换为相对 dB。
+6. 新场景导入后旧 report 失效。
+7. 缺失 RX frame、空 RT、越界 frame 和非有限图形数据返回结构化错误。
+8. 真实 MPDB 样本生成 179 个 comparison frame；前段接收端移动、后段静止；所有逐帧拟合指标有限。
 
-最终验收命令：
+最终验收：
 
 ```bash
 npm run verify
@@ -167,4 +213,4 @@ node scripts/verify-mpdb-sample.mjs <MPDB.zip> <base.json> <terminal.json>
 npm run full
 ```
 
-`npm run full` 只做短时 UI/API 启动检查，确认后正常终止。
+`npm run full` 仅做短时 UI/API 启动检查，确认后正常终止。
