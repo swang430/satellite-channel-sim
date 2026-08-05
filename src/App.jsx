@@ -8,6 +8,8 @@ import ChannelSimPanel from './ChannelSimPanel';
 import UserManual from './UserManual';
 import ApiDashboard from './panels/ApiDashboard';
 import { buildSimulationProjectManifest, buildTrajectoryCsv } from './projectSync';
+import { ORBIT_SATELLITES } from './knownSatellites.js';
+import { diagnoseTleAge } from './orbit/tle.js';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, BarController, Title, Tooltip, Legend, ScatterController);
 ChartJS.defaults.color = 'rgba(0, 229, 255, 0.7)';
@@ -388,10 +390,8 @@ function App() {
   const [, setReplayIndex] = useState(0);
 
   // Orbital Mechanics Controls
-  const ISS_TLE1 = '1 25544U 98067A   23249.52157811  .00018042  00000-0  32479-3 0  9997';
-  const ISS_TLE2 = '2 25544  51.6420 330.1245 0005273  19.5398  65.7335 15.49841804414341';
-  const [tleLine1, setTleLine1] = useState(ISS_TLE1);
-  const [tleLine2, setTleLine2] = useState(ISS_TLE2);
+  const [tleLine1, setTleLine1] = useState(ORBIT_SATELLITES.ISS.tleLine1);
+  const [tleLine2, setTleLine2] = useState(ORBIT_SATELLITES.ISS.tleLine2);
   const [isDynamicOrbit, setIsDynamicOrbit] = useState(true);
   const [showManual, setShowManual] = useState(false);
   const [showApiDashboard, setShowApiDashboard] = useState(false);
@@ -674,15 +674,12 @@ function App() {
   // === Milestone 19: Parse TLE Epoch Age ===
   function parseTLEEpochAgeDays(tle1) {
     try {
-      const yearStr = tle1.substring(18, 20);
-      const dayStr = tle1.substring(20, 32);
-      const year2d = parseInt(yearStr);
-      const fullYear = year2d >= 57 ? 1900 + year2d : 2000 + year2d;
-      const dayOfYear = parseFloat(dayStr);
-      const epochDate = new Date(Date.UTC(fullYear, 0, 1));
-      epochDate.setTime(epochDate.getTime() + (dayOfYear - 1) * 86400000);
-      const ageDays = (Date.now() - epochDate.getTime()) / 86400000;
-      return { epochDate, ageDays };
+      const diagnostics = diagnoseTleAge({ tleLine1: tle1 });
+      return {
+        epochDate: new Date(diagnostics.epochUtc),
+        ageDays: diagnostics.ageDays,
+        diagnostics
+      };
     } catch { return { epochDate: null, ageDays: -1 }; }
   }
   const tleEpochInfo = parseTLEEpochAgeDays(tleLine1);

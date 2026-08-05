@@ -1,3 +1,24 @@
+export const ORBIT_SATELLITES = Object.freeze({
+    ISS: Object.freeze({
+        name: 'ISS (ZARYA)',
+        noradId: '25544',
+        tleLine1: '1 25544U 98067A   24138.54847222  .00017261  00000-0  31516-3 0  9992',
+        tleLine2: '2 25544  51.6420 148.9032 0003403 249.7827 110.2962 15.49904425451604'
+    }),
+    'CSS-TIANHE': Object.freeze({
+        name: 'CSS (TIANHE-1)',
+        noradId: '48274',
+        tleLine1: '1 48274U 21035A   24138.57288657  .00020449  00000-0  28634-3 0  9994',
+        tleLine2: '2 48274  41.4698 269.7231 0002345 313.7049  46.3392 15.61165546168894'
+    })
+});
+
+export function getOrbitSatellite(id) {
+    if (typeof id !== 'string') return null;
+    const normalized = id.trim().toUpperCase().replace('_', '-');
+    return ORBIT_SATELLITES[normalized] ?? null;
+}
+
 /**
  * 已知卫星参考库 — 用于地面测量校准
  *

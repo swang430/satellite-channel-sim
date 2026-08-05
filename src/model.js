@@ -1,6 +1,7 @@
-import * as satelliteModule from 'satellite.js';
-const satellite = satelliteModule.degreesToRadians ? satelliteModule : satelliteModule.default;
+import * as satellite from 'satellite.js';
 import { computeStatisticalCir } from './channel/statisticalCir.js';
+import { calculateDopplerFromEciState } from './geometry/eciEcf.js';
+import { groundPositionEcf } from './geometry/linkGeometry.js';
 
 // ITU-R P.838-3 Table 1: Specific rain attenuation coefficients (horizontal polarization).
 // Sorted by frequency (GHz). Used for log-linear interpolation per the standard.
@@ -340,7 +341,6 @@ export function predictPasses(tleLine1, tleLine2, observerLat, observerLon, obse
       latitude: satellite.degreesToRadians(observerLat),
       height: observerAlt / 1000.0
     };
-
     const passes = [];
     const now = new Date();
     const endTime = new Date(now.getTime() + hoursAhead * 3600000);
@@ -962,6 +962,11 @@ export function generateChannelTimeSeriesForTimestamps(
       latitude: satellite.degreesToRadians(observerLat),
       height: observerAlt / 1000.0
     };
+    const observerPositionEcf_km = groundPositionEcf({
+      latitude_deg: observerLat,
+      longitude_deg: observerLon,
+      altitude_m: observerAlt,
+    });
 
     const k_boltzmann = 1.380649e-23;
     const timeline = [];
@@ -979,14 +984,13 @@ export function generateChannelTimeSeriesForTimestamps(
       const az = satellite.radiansToDegrees(la.azimuth);
       const range = la.rangeSat;
 
-      // === Doppler ===
-      const velEcf = satellite.eciToEcf(pv.velocity, gmst);
-      const obsEcfPos = satellite.geodeticToEcf(observerGd);
-      const satEcfPos = ecf;
-      const losX = obsEcfPos.x - satEcfPos.x, losY = obsEcfPos.y - satEcfPos.y, losZ = obsEcfPos.z - satEcfPos.z;
-      const losMag = Math.sqrt(losX*losX + losY*losY + losZ*losZ);
-      const vRadial = losMag > 0 ? (velEcf.x*losX + velEcf.y*losY + velEcf.z*losZ) / losMag : 0;
-      const dopplerHz = ((linkParams.freq || 30) * 1e9) * (vRadial * 1000) / 299792458;
+      const dopplerHz = calculateDopplerFromEciState({
+        positionEci_km: pv.position,
+        velocityEci_kmps: pv.velocity,
+        observerPositionEcf_km,
+        gmst_rad: gmst,
+        frequency_Hz: (linkParams.freq ?? 30) * 1e9,
+      }).doppler_Hz;
 
       const simTimeSec = (date.getTime() - timestamps[0].getTime()) / 1000.0;
 
@@ -1056,6 +1060,11 @@ export function generateChannelTimeSeries(
       latitude: satellite.degreesToRadians(observerLat),
       height: observerAlt / 1000.0
     };
+    const observerPositionEcf_km = groundPositionEcf({
+      latitude_deg: observerLat,
+      longitude_deg: observerLon,
+      altitude_m: observerAlt,
+    });
 
     const k_boltzmann = 1.380649e-23;
     const timeline = [];
@@ -1074,27 +1083,13 @@ export function generateChannelTimeSeries(
       const az = satellite.radiansToDegrees(la.azimuth);
       const range = la.rangeSat;
 
-      // === Doppler: project satellite velocity onto LOS unit vector ===
-      // velocityEci is in km/s from SGP4
-      const velEci = pv.velocity;  // { x, y, z } km/s
-      const velEcf = satellite.eciToEcf(velEci, gmst);  // rotate to ECF
-      // Observer ECF position (WGS84 approx)
-      const obsEcfPos = satellite.geodeticToEcf({ longitude: satellite.degreesToRadians(observerLon), latitude: satellite.degreesToRadians(observerLat), height: observerAlt / 1000.0 });
-      // Satellite ECF position
-      const satEcfPos = satellite.eciToEcf(pv.position, gmst);
-      // LOS vector (sat -> observer, km)
-      const losX = obsEcfPos.x - satEcfPos.x;
-      const losY = obsEcfPos.y - satEcfPos.y;
-      const losZ = obsEcfPos.z - satEcfPos.z;
-      const losMag = Math.sqrt(losX*losX + losY*losY + losZ*losZ);
-      const losUx = losMag > 0 ? losX / losMag : 0;
-      const losUy = losMag > 0 ? losY / losMag : 0;
-      const losUz = losMag > 0 ? losZ / losMag : 0;
-      // Radial velocity = dot(velEcf, losUnit)  [km/s, positive = approaching]
-      const vRadial_km_s = velEcf.x * losUx + velEcf.y * losUy + velEcf.z * losUz;
-      // Doppler shift [Hz]: fd = f0 * v_radial / c
-      const freqHz = (linkParams.freq || 30) * 1e9;
-      const dopplerHz = freqHz * (vRadial_km_s * 1000) / 299792458;
+      const dopplerHz = calculateDopplerFromEciState({
+        positionEci_km: pv.position,
+        velocityEci_kmps: pv.velocity,
+        observerPositionEcf_km,
+        gmst_rad: gmst,
+        frequency_Hz: (linkParams.freq ?? 30) * 1e9,
+      }).doppler_Hz;
 
       // 仿真时间（秒），用于 SoS 确定性衰落
       const simTimeSec = frameIndex * stepSec;
@@ -1446,24 +1441,18 @@ export function calculateDopplerShift(tleLine1, tleLine2, gsLat, gsLon, gsAlt, d
     if (!pv.position || !pv.velocity) return 0;
 
     const gmst = satellite.gstime(date);
-    const velEcf = satellite.eciToEcf(pv.velocity, gmst);
-    const satEcf = satellite.eciToEcf(pv.position, gmst);
-    const obsEcf = satellite.geodeticToEcf({
-      longitude: satellite.degreesToRadians(gsLon),
-      latitude: satellite.degreesToRadians(gsLat),
-      height: gsAlt / 1000.0
+    const observerPositionEcf_km = groundPositionEcf({
+      latitude_deg: gsLat,
+      longitude_deg: gsLon,
+      altitude_m: gsAlt,
     });
-
-    // LOS unit vector: satellite -> observer
-    const dx = obsEcf.x - satEcf.x;
-    const dy = obsEcf.y - satEcf.y;
-    const dz = obsEcf.z - satEcf.z;
-    const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
-    if (dist < 1e-9) return 0;
-
-    // Radial velocity (km/s, positive = satellite approaching observer)
-    const vr = (velEcf.x * dx + velEcf.y * dy + velEcf.z * dz) / dist;
-    return (freqGHz * 1e9) * (vr * 1000) / 299792458;
+    return calculateDopplerFromEciState({
+      positionEci_km: pv.position,
+      velocityEci_kmps: pv.velocity,
+      observerPositionEcf_km,
+      gmst_rad: gmst,
+      frequency_Hz: freqGHz * 1e9,
+    }).doppler_Hz;
   } catch (e) {
     return 0;
   }

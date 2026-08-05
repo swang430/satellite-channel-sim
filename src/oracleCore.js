@@ -132,19 +132,27 @@ function computeKFactor(timeline) {
  * @param {Object} tle - { tleLine1, tleLine2 }
  * @param {number} gsLat - ground station latitude (deg)
  * @param {number} gsLon - ground station longitude (deg)
- * @param {number} gsAlt - ground station altitude (km)
+ * @param {number} gsAlt - ground station altitude (m)
  * @param {Object} linkParams - optional link budget overrides
  * @returns {Object|null} link state snapshot
  */
-export function predictLinkStateNow(tle, gsLat, gsLon, gsAlt = 0, linkParams = {}) {
+export function predictLinkStateNow(
+  tle,
+  gsLat,
+  gsLon,
+  gsAlt = 0,
+  linkParams = {},
+  runtime = {},
+) {
   const params = { ...DEFAULT_LINK_PARAMS, ...linkParams };
-  const now = new Date();
+  const now = runtime.now ?? new Date();
+  const timelineProvider = runtime.timelineProvider ?? generateChannelTimeSeries;
   
   // Generate a 10-second window around now
   const start = new Date(now.getTime() - 5000);
   const end = new Date(now.getTime() + 5000);
   
-  const timeline = generateChannelTimeSeries(
+  const timeline = timelineProvider(
     tle.tleLine1, tle.tleLine2, gsLat, gsLon, gsAlt,
     start, end, 1, params
   );
@@ -158,7 +166,7 @@ export function predictLinkStateNow(tle, gsLat, gsLon, gsAlt = 0, linkParams = {
     const diff = Math.abs(frame.time.getTime() - now.getTime());
     if (diff < bestDiff) { best = frame; bestDiff = diff; }
   }
-  
+  if (!Number.isFinite(best.elevation) || best.elevation <= 0) return null;
   return formatLinkState(best, 'now');
 }
 
@@ -170,7 +178,7 @@ export function predictLinkStateNow(tle, gsLat, gsLon, gsAlt = 0, linkParams = {
  * @param {Object} tle - { tleLine1, tleLine2 }
  * @param {number} gsLat - ground station latitude (deg)
  * @param {number} gsLon - ground station longitude (deg)
- * @param {number} gsAlt - ground station altitude (km)
+ * @param {number} gsAlt - ground station altitude (m)
  * @param {number} hoursAhead - lookahead window in hours (default 24)
  * @param {Object} linkParams - optional link budget overrides
  * @returns {Array} array of { pass, linkStates[] } per pass
@@ -199,7 +207,10 @@ export function predictLinkStateWindow(tle, gsLat, gsLon, gsAlt = 0, hoursAhead 
     
     if (!timeline || timeline.length === 0) continue;
     
-    const linkStates = timeline.map(frame => formatLinkState(frame, 'window'));
+    const linkStates = timeline
+      .filter((frame) => frame.elevation > 0)
+      .map((frame) => formatLinkState(frame, 'window'));
+    if (linkStates.length === 0) continue;
     const summary = summarizePass(linkStates);
     const ntnParams = mapToNTNParams(timeline);
     
@@ -236,7 +247,9 @@ export function predictLinkStatePass(tle, gsLat, gsLon, gsAlt, startTime, endTim
   
   if (!timeline || timeline.length === 0) return [];
   
-  return timeline.map(frame => formatLinkState(frame, 'pass'));
+  return timeline
+    .filter((frame) => frame.elevation > 0)
+    .map((frame) => formatLinkState(frame, 'pass'));
 }
 
 // ─── Formatting ─────────────────────────────────────────────────────────

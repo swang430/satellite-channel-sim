@@ -12,6 +12,8 @@ import { createServer } from 'node:http';
 import { parse as parseUrl } from 'node:url';
 import { networkInterfaces } from 'node:os';
 import { WebSocketServer } from 'ws';
+import { ORBIT_SATELLITES, getOrbitSatellite } from '../src/knownSatellites.js';
+import { diagnoseTleAge, withTleDiagnostics } from '../src/orbit/tle.js';
 
 // Dynamic import so Vite doesn't try to bundle this during `npm run build`
 async function loadOracle() {
@@ -21,20 +23,6 @@ async function loadOracle() {
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
 const HOST = process.env.HOST || '0.0.0.0';
-
-// ─── Known Satellite Registry ───────────────────────────────────────────
-const KNOWN_SATELLITES = {
-  'ISS': {
-    name: 'ISS (ZARYA)',
-    tleLine1: '1 25544U 98067A   24138.54847222  .00017261  00000-0  31516-3 0  9992',
-    tleLine2: '2 25544  51.6420 148.9032 0003403 249.7827 110.2962 15.49904425451604'
-  },
-  'CSS-TIANHE': {
-    name: 'CSS (TIANHE-1)',
-    tleLine1: '1 48274U 21035A   24138.57288657  .00020449  00000-0  28634-3 0  9994',
-    tleLine2: '2 48274  41.4698 269.7231 0002345 313.7049  46.3392 15.61165546168894'
-  }
-};
 
 // ─── Helpers ────────────────────────────────────────────────────────────
 function sendJSON(res, code, data) {
@@ -61,15 +49,17 @@ function parseQuery(url) {
 function resolveSat(query) {
   // Priority: explicit TLE > known satellite name
   if (query.tle1 && query.tle2) {
-    return { tleLine1: query.tle1, tleLine2: query.tle2, name: 'custom' };
+    const custom = { tleLine1: query.tle1, tleLine2: query.tle2, name: 'custom' };
+    return { ...custom, tleDiagnostics: diagnoseTleAge(custom) };
   }
-  const satName = (query.sat || 'ISS').toUpperCase();
-  const known = KNOWN_SATELLITES[satName];
-  if (known) return { ...known };
+  const satName = query.sat || 'ISS';
+  const known = getOrbitSatellite(satName);
+  if (known) return { ...known, tleDiagnostics: diagnoseTleAge(known) };
   // Try case-insensitive matching
-  for (const [key, val] of Object.entries(KNOWN_SATELLITES)) {
-    if (key.includes(satName) || val.name.toUpperCase().includes(satName)) {
-      return { ...val };
+  const normalizedName = satName.toUpperCase();
+  for (const [key, val] of Object.entries(ORBIT_SATELLITES)) {
+    if (key.includes(normalizedName) || val.name.toUpperCase().includes(normalizedName)) {
+      return { ...val, tleDiagnostics: diagnoseTleAge(val) };
     }
   }
   return null;
@@ -92,7 +82,7 @@ async function handleHealth(req, res) {
     service: 'satellite-channel-sim-link-state-api',
     version: '1.0.0',
     uptime: process.uptime(),
-    knownSatellites: Object.keys(KNOWN_SATELLITES),
+    knownSatellites: Object.keys(ORBIT_SATELLITES),
     endpoints: [
       'GET /api/v1/health',
       'GET /api/v1/predict/now?sat=ISS&gs=31.23,121.47,0',
@@ -107,21 +97,21 @@ async function handleHealth(req, res) {
 async function handlePredictNow(req, res, oracle) {
   const query = parseQuery(req.url);
   const sat = resolveSat(query);
-  if (!sat) return sendJSON(res, 400, { error: 'Unknown satellite', known: Object.keys(KNOWN_SATELLITES) });
+  if (!sat) return sendJSON(res, 400, { error: 'Unknown satellite', known: Object.keys(ORBIT_SATELLITES) });
   
   const gs = resolveGroundStation(query);
   
   try {
     const result = oracle.predictLinkStateNow(sat, gs.lat, gs.lon, gs.alt);
     if (!result) {
-      return sendJSON(res, 200, { 
+      return sendJSON(res, 200, withTleDiagnostics({
         status: 'no_contact',
         message: `Satellite ${sat.name} is not currently visible from ground station`,
         satellite: sat.name,
         groundStation: { lat: gs.lat, lon: gs.lon, alt: gs.alt }
-      });
+      }, sat));
     }
-    sendJSON(res, 200, { status: 'ok', result });
+    sendJSON(res, 200, { status: 'ok', tleDiagnostics: sat.tleDiagnostics, result });
   } catch (e) {
     sendJSON(res, 500, { error: e.message });
   }
@@ -130,7 +120,7 @@ async function handlePredictNow(req, res, oracle) {
 async function handlePredictWindow(req, res, oracle) {
   const query = parseQuery(req.url);
   const sat = resolveSat(query);
-  if (!sat) return sendJSON(res, 400, { error: 'Unknown satellite', known: Object.keys(KNOWN_SATELLITES) });
+  if (!sat) return sendJSON(res, 400, { error: 'Unknown satellite', known: Object.keys(ORBIT_SATELLITES) });
   
   const gs = resolveGroundStation(query);
   const hours = Math.min(72, Math.max(1, parseInt(query.hours || '24') || 24));
@@ -140,6 +130,7 @@ async function handlePredictWindow(req, res, oracle) {
     sendJSON(res, 200, {
       status: 'ok',
       satellite: sat.name,
+      tleDiagnostics: sat.tleDiagnostics,
       groundStation: { lat: gs.lat, lon: gs.lon, alt: gs.alt },
       lookaheadHours: hours,
       passCount: predictions.length,
@@ -153,7 +144,7 @@ async function handlePredictWindow(req, res, oracle) {
 async function handlePredictMods(req, res, oracle) {
   const query = parseQuery(req.url);
   const sat = resolveSat(query);
-  if (!sat) return sendJSON(res, 400, { error: 'Unknown satellite', known: Object.keys(KNOWN_SATELLITES) });
+  if (!sat) return sendJSON(res, 400, { error: 'Unknown satellite', known: Object.keys(ORBIT_SATELLITES) });
   
   const gs = resolveGroundStation(query);
   const hours = Math.min(72, Math.max(1, parseInt(query.hours || '24') || 24));
@@ -180,6 +171,7 @@ async function handlePredictMods(req, res, oracle) {
     sendJSON(res, 200, {
       status: 'ok',
       satellite: sat.name,
+      tleDiagnostics: sat.tleDiagnostics,
       groundStation: { lat: gs.lat, lon: gs.lon, alt: gs.alt },
       lookaheadHours: hours,
       modcodTimeline,
@@ -193,10 +185,11 @@ async function handlePredictMods(req, res, oracle) {
 async function handleSatellites(req, res) {
   sendJSON(res, 200, {
     status: 'ok',
-    count: Object.keys(KNOWN_SATELLITES).length,
-    satellites: Object.entries(KNOWN_SATELLITES).map(([id, data]) => ({
+    count: Object.keys(ORBIT_SATELLITES).length,
+    satellites: Object.entries(ORBIT_SATELLITES).map(([id, data]) => ({
       id,
-      name: data.name
+      name: data.name,
+      tleDiagnostics: diagnoseTleAge(data)
     })),
     note: 'Add custom satellites via ?tle1=...&tle2=... parameters'
   });
@@ -219,7 +212,7 @@ function setupWebSocket(wss, oracle) {
         const msg = JSON.parse(data.toString());
         const { sat: satId, gs: gsStr, hours } = msg;
         
-        const sat = KNOWN_SATELLITES[satId?.toUpperCase()] || KNOWN_SATELLITES['ISS'];
+        const sat = getOrbitSatellite(satId || 'ISS') || ORBIT_SATELLITES.ISS;
         const gsParts = (gsStr || '31.23,121.47,0').split(',').map(Number);
         const gs = { lat: gsParts[0], lon: gsParts[1], alt: gsParts[2] || 0 };
         const lookahead = Math.min(72, Math.max(1, parseInt(hours || '24') || 24));
@@ -229,6 +222,7 @@ function setupWebSocket(wss, oracle) {
         ws.send(JSON.stringify({
           type: 'prediction',
           satellite: sat.name,
+          tleDiagnostics: diagnoseTleAge(sat),
           groundStation: { lat: gs.lat, lon: gs.lon, alt: gs.alt },
           lookaheadHours: lookahead,
           passCount: predictions.length,
