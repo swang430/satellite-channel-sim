@@ -10,6 +10,9 @@ import ApiDashboard from './panels/ApiDashboard';
 import { buildSimulationProjectManifest, buildTrajectoryCsv } from './projectSync';
 import { ORBIT_SATELLITES } from './knownSatellites.js';
 import { diagnoseTleAge } from './orbit/tle.js';
+import { useChannelReplay } from './features/replay/useChannelReplay.js';
+import { appendBounded } from './replay/boundedSeries.js';
+import { deriveOpenMeteoSample } from './replay/weatherSample.js';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, BarController, Title, Tooltip, Legend, ScatterController);
 ChartJS.defaults.color = 'rgba(0, 229, 255, 0.7)';
@@ -344,7 +347,15 @@ function SkyPlotCanvas({ canvasRef, tleLine1, tleLine2, syncLat, syncLon, sample
     return () => clearInterval(timer);
   }, [tleLine1, tleLine2, syncLat, syncLon, samplePoints, activeSampleIndex, ref]);
 
-  return <canvas ref={ref} width={300} height={300} style={{ border: '1px solid #333', borderRadius: '5px', flex: '0 0 300px' }} />;
+  return (
+    <canvas
+      ref={ref}
+      width={300}
+      height={300}
+      onClick={handleCanvasClick}
+      style={{ border: '1px solid #333', borderRadius: '5px', flex: '0 0 300px', cursor: samplePoints.length > 0 ? 'pointer' : 'default' }}
+    />
+  );
 }
 
 function App() {
@@ -385,9 +396,26 @@ function App() {
   const [syncLon, setSyncLon] = useState(121.244818);
   const [gsAlt, setGsAlt] = useState(15); // Ground Station altitude in meters
   const [disableFastFading, setDisableFastFading] = useState(true);
-
-  const [replayData] = useState([]);
-  const [, setReplayIndex] = useState(0);
+  const handleWeatherReplayFrame = useCallback((frame, frameIndex) => {
+    const rainRate = frame.metrics.observation.rainRate_mmph ?? 0;
+    const derivedLoss = frame.metrics.derived.rainAttenuation_dB ?? 0;
+    setRealData(prev => appendBounded(prev, {
+      timestampUtc: frame.timestampUtc,
+      rainRate,
+      derivedLoss,
+      observationSource: frame.metrics.observation.source,
+      lossSource: frame.metrics.derived.source,
+    }, 3600));
+    setFittingInfo(`[JSON 回放] 帧 ${frameIndex + 1}：观测降水 ${rainRate} mm/h；模型派生损耗 ${derivedLoss.toFixed(3)} dB`);
+  }, []);
+  const handleWeatherReplayComplete = useCallback(() => {
+    setIsLiveSync(false);
+    setFittingInfo('JSON 回放完成。');
+  }, []);
+  const weatherReplay = useChannelReplay({
+    onFrame: handleWeatherReplayFrame,
+    onComplete: handleWeatherReplayComplete,
+  });
 
   // Orbital Mechanics Controls
   const [tleLine1, setTleLine1] = useState(ORBIT_SATELLITES.ISS.tleLine1);
@@ -405,11 +433,21 @@ function App() {
   const skyPlotRef = useRef(null);
 
   // === Milestone 23: Replay State ===
-  const [replayTimeline, setReplayTimeline] = useState([]);
-  const [replayIdx, setReplayIdx] = useState(0);
-  const [isReplaying, setIsReplaying] = useState(false);
-  const [replaySpeed, setReplaySpeed] = useState(5);
-  const replayTimerRef = useRef(null);
+  const handleOrbitReplayFrame = useCallback((frame) => {
+    setParams(prev => ({
+      ...prev,
+      elevation: Math.max(0.1, frame.elevation),
+      slantRange: frame.slantRange,
+    }));
+  }, []);
+  const orbitReplay = useChannelReplay({
+    onFrame: handleOrbitReplayFrame,
+    defaultSpeed: 5,
+  });
+  const replayTimeline = orbitReplay.frames;
+  const replayIdx = orbitReplay.index;
+  const isReplaying = orbitReplay.isPlaying;
+  const replaySpeed = orbitReplay.speed;
   const [replayMinutesAhead, setReplayMinutesAhead] = useState(20);
   const [replayStartTime, setReplayStartTime] = useState(() => {
     const tzOffset = (new Date()).getTimezoneOffset() * 60000;
@@ -419,34 +457,11 @@ function App() {
   const [requestedCirIndex, setRequestedCirIndex] = useState(0);
   const [cirSyncState, setCirSyncState] = useState(DEFAULT_CIR_SYNC_STATE);
 
-  // Replay animation effect
-  useEffect(() => {
-    if (isReplaying && replayTimeline.length > 0) {
-      replayTimerRef.current = setInterval(() => {
-        setReplayIdx(prev => {
-          if (prev >= replayTimeline.length - 1) { setIsReplaying(false); return prev; }
-          return prev + 1;
-        });
-      }, 1000 / replaySpeed);
-    }
-    return () => clearInterval(replayTimerRef.current);
-  }, [isReplaying, replaySpeed, replayTimeline.length]);
-
-  // Sync replay frame to link params
-  useEffect(() => {
-    if (replayTimeline.length > 0 && replayIdx < replayTimeline.length) {
-      const frame = replayTimeline[replayIdx];
-      setParams(prev => ({ ...prev, elevation: Math.max(0.1, frame.elevation), slantRange: frame.slantRange }));
-    }
-  }, [replayIdx, replayTimeline]);
-
   function handleGenerateReplay() {
     const start = new Date(replayStartTime);
     const end = new Date(start.getTime() + replayMinutesAhead * 60000);
     const tl = generatePassReplay(tleLine1, tleLine2, syncLat, syncLon, gsAlt, start, end, 10, params);
-    setReplayTimeline(tl);
-    setReplayIdx(0);
-    setIsReplaying(false);
+    orbitReplay.loadFrames(tl);
   }
 
   function handleExportReplay() {
@@ -778,21 +793,26 @@ function App() {
   useEffect(() => {
     let intervalId;
 
-    if (isLiveSync) {
-      if (syncMode === 'A') {
+    if (isLiveSync && syncMode === 'A') {
         const fetchWeather = async () => {
           try {
             const url = `https://api.open-meteo.com/v1/forecast?latitude=${syncLat}&longitude=${syncLon}&current=precipitation&timezone=auto`;
             const res = await fetch(url);
             const data = await res.json();
-            const rain_rate = data?.current?.precipitation || 0;
-
-            const theoretical_loss_ku = 0.018 * Math.pow(rain_rate, 1.15) * 5.0;
-            const noise = (Math.random() * 1.0) - 0.5;
-            const measuredLoss = Math.max(0, theoretical_loss_ku + noise);
-
-            setRealData(prev => [...prev, { rainRate: rain_rate, measuredLoss }]);
-            setFittingInfo(`[Live API] Lat ${syncLat}, Lon ${syncLon} -> Rain: ${rain_rate} mm/h`);
+            const sample = deriveOpenMeteoSample({
+              timestampUtc: new Date().toISOString(),
+              precipitation_mmph: data?.current?.precipitation ?? 0,
+            });
+            const rainRate = sample.metrics.observation.rainRate_mmph;
+            const derivedLoss = sample.metrics.derived.rainAttenuation_dB;
+            setRealData(prev => appendBounded(prev, {
+              timestampUtc: sample.timestampUtc,
+              rainRate,
+              derivedLoss,
+              observationSource: sample.metrics.observation.source,
+              lossSource: sample.metrics.derived.source,
+            }, 3600));
+            setFittingInfo(`[Open-Meteo] 观测输入：降水 ${rainRate} mm/h；模型派生：雨衰 ${derivedLoss.toFixed(3)} dB`);
           } catch (e) {
             setFittingInfo("[Live API Error] " + e.message);
             setIsLiveSync(false);
@@ -802,34 +822,10 @@ function App() {
         setFittingInfo(`Connecting to Open-Meteo API...`);
         fetchWeather();
         intervalId = setInterval(fetchWeather, 10000);
-
-      } else if (syncMode === 'B') {
-        if (replayData.length === 0) {
-          setFittingInfo("Replay Error: No JSON data loaded.");
-          setIsLiveSync(false);
-          return;
-        }
-
-        setFittingInfo("Starting Historical Data Replay...");
-        intervalId = setInterval(() => {
-          setReplayIndex(prevIdx => {
-            if (prevIdx < replayData.length) {
-              const point = replayData[prevIdx];
-              setRealData(prev => [...prev, { rainRate: point.rainRate, measuredLoss: point.measuredLoss }]);
-              setFittingInfo(`[Replay Mode] Sent Frame ${prevIdx + 1}/${replayData.length}`);
-              return prevIdx + 1;
-            } else {
-              setFittingInfo("Replay Finished.");
-              setIsLiveSync(false);
-              return prevIdx;
-            }
-          });
-        }, 1000);
-      }
     }
 
     return () => clearInterval(intervalId);
-  }, [isLiveSync, syncMode, syncLat, syncLon, replayData]);
+  }, [isLiveSync, syncMode, syncLat, syncLon]);
 
   const handleToggleSync = (e) => {
     const checked = e.target.checked;
@@ -837,8 +833,16 @@ function App() {
     if (checked) {
       setRealData([]);
       if (syncMode === 'B') {
-        setReplayIndex(0);
+        if (weatherReplay.frames.length === 0) {
+          setFittingInfo('Replay Error: 请先加载 JSON 数据。');
+          setIsLiveSync(false);
+          return;
+        }
+        setFittingInfo('开始 Historical JSON Replay…');
+        weatherReplay.start();
       }
+    } else if (syncMode === 'B') {
+      weatherReplay.stop();
     }
   };
 
@@ -897,7 +901,7 @@ function App() {
 
   const scatterData = realData.map(d => ({
     x: d.rainRate,
-    y: d.measuredLoss
+    y: d.derivedLoss
   }));
 
   const chartData = {
@@ -914,7 +918,7 @@ function App() {
       },
       {
         type: 'scatter',
-        label: 'Real Measurement Data',
+        label: 'Model-derived loss (weather observation input)',
         data: scatterData,
         backgroundColor: 'rgb(54, 162, 235)',
         borderColor: 'rgb(54, 162, 235)',
@@ -935,7 +939,7 @@ function App() {
 
   const scatterDataFreq = realData.map(d => ({
     x: d.freq || params.freq, // Support Sweep: use injected freq or fallback to global UI freq
-    y: d.measuredLoss
+    y: d.derivedLoss
   }));
 
   const chartDataFreq = {
@@ -952,7 +956,7 @@ function App() {
       },
       {
         type: 'scatter',
-        label: `Scatter Measurements (Multi-Freq Capable)`,
+        label: `Model-derived samples (not measurements)`,
         data: scatterDataFreq,
         backgroundColor: 'rgb(153, 102, 255)',
         borderColor: 'rgb(153, 102, 255)',
@@ -1320,11 +1324,11 @@ function App() {
             </button>
             {replayTimeline.length > 0 && (
               <>
-                <button onClick={() => setIsReplaying(!isReplaying)} style={{ padding: '4px 12px', background: isReplaying ? '#dc3545' : '#28a745', color: 'white', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}>
+                <button onClick={() => isReplaying ? orbitReplay.stop() : orbitReplay.start()} style={{ padding: '4px 12px', background: isReplaying ? '#dc3545' : '#28a745', color: 'white', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}>
                   {isReplaying ? '⏸ Pause' : '▶️ Play'}
                 </button>
                 <label style={{ fontSize: '0.85em' }}>Speed:
-                  <select value={replaySpeed} onChange={e => setReplaySpeed(parseInt(e.target.value))} style={{ marginLeft: '4px' }}>
+                  <select value={replaySpeed} onChange={e => orbitReplay.setSpeed(parseInt(e.target.value))} style={{ marginLeft: '4px' }}>
                     <option value={1}>1x</option>
                     <option value={2}>2x</option>
                     <option value={5}>5x</option>
@@ -1343,7 +1347,7 @@ function App() {
             <>
               {/* Time scrub slider */}
               <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '8px' }}>
-                <input type="range" min={0} max={replayTimeline.length - 1} value={replayIdx} onChange={e => { setIsReplaying(false); setReplayIdx(parseInt(e.target.value)); }} style={{ flex: 1 }} />
+                <input type="range" min={0} max={replayTimeline.length - 1} value={replayIdx} onChange={e => orbitReplay.seek(parseInt(e.target.value))} style={{ flex: 1 }} />
                 <span style={{ fontFamily: 'monospace', fontSize: '0.85em', minWidth: '180px' }}>
                   {replayTimeline[replayIdx]?.timeLabel} | El: {replayTimeline[replayIdx]?.elevation.toFixed(1)}° | Loss: {replayTimeline[replayIdx]?.totalLoss.toFixed(1)}dB
                 </span>
@@ -1503,6 +1507,29 @@ function App() {
             Loaded JSON Replay
           </label>
 
+          {syncMode === 'B' && (
+            <label style={{ display: 'inline-flex', alignItems: 'center', marginRight: '16px', flexDirection: 'row', gap: '6px' }}>
+              <span>JSON:</span>
+              <input
+                type="file"
+                accept="application/json,.json"
+                disabled={isLiveSync}
+                onChange={async event => {
+                  const file = event.target.files?.[0];
+                  if (!file) return;
+                  try {
+                    const parsed = weatherReplay.loadText(await file.text());
+                    setFittingInfo(`已加载 ${parsed.frames.length} 个回放帧；${parsed.diagnostics.length} 条来源诊断。`);
+                  } catch (error) {
+                    setFittingInfo(`Replay JSON 错误：${error.message}`);
+                  }
+                }}
+                style={{ width: '220px', marginTop: 0 }}
+              />
+              <span style={{ color: '#4ecdc4', fontSize: '0.8em' }}>{weatherReplay.frames.length} 帧</span>
+            </label>
+          )}
+
           <span style={{ display: 'inline-flex', gap: '5px' }}>
             <input type="number" step="0.1" value={syncLat} onChange={e => setSyncLat(parseFloat(e.target.value))} placeholder="Lat" style={{ width: '80px', marginTop: 0 }} disabled={isLiveSync} />
             <input type="number" step="0.1" value={syncLon} onChange={e => setSyncLon(parseFloat(e.target.value))} placeholder="Lon" style={{ width: '80px', marginTop: 0 }} disabled={isLiveSync} />
@@ -1519,6 +1546,15 @@ function App() {
           </label>
         </div>
         {fittingInfo && <p className="info-text">{fittingInfo}</p>}
+        {realData.length > 0 && (
+          <p style={{ fontSize: '0.8em', color: '#aaa' }}>
+            <span style={{ color: '#4ecdc4' }}>观测输入：降水率</span>
+            {' · '}
+            <span style={{ color: '#f7dc6f' }}>模型派生：雨衰（synthetic-derived）</span>
+            {' · '}
+            有界序列 {realData.length}/3600
+          </p>
+        )}
       </div>
 
       {/* === 使用手册浮层 === */}

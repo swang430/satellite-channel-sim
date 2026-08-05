@@ -288,8 +288,8 @@ export default function UserManual({ onClose }) {
                             <th style={thStyle}>模式</th><th style={thStyle}>数据源</th><th style={thStyle}>用途</th>
                         </tr></thead>
                         <tbody>
-                            <tr><td style={tdStyle}>Open-Meteo API</td><td style={tdStyle}>在线气象 API</td><td style={tdStyle}>实时驱动主面板雨衰可视化</td></tr>
-                            <tr><td style={tdStyle}>JSON Replay</td><td style={tdStyle}>本地历史 JSON</td><td style={tdStyle}>回放特定时段的天气条件</td></tr>
+                            <tr><td style={tdStyle}>Open-Meteo API</td><td style={tdStyle}>观测输入：当前降水率</td><td style={tdStyle}>驱动本地模型计算雨衰；雨衰标记为 synthetic-derived，不是测量值</td></tr>
+                            <tr><td style={tdStyle}>JSON Replay</td><td style={tdStyle}>本地、带时间戳的历史输入</td><td style={tdStyle}>按帧回放观测输入和模型派生指标，最多保留 3,600 点</td></tr>
                         </tbody>
                     </table>
 
@@ -297,6 +297,17 @@ export default function UserManual({ onClose }) {
                         <strong>💡 提示：</strong>天气同步面板仅影响主面板的实时图表展示。
                         信道仿真面板（ChannelSimPanel）使用自身的 Rain Rate 参数，两者独立互不影响。
                     </div>
+                    <pre style={{ background: 'rgba(0,0,0,0.3)', padding: '12px', borderRadius: '5px', fontSize: '0.8em', overflowX: 'auto', color: '#aaa', lineHeight: '1.5' }}>
+                        {`{
+  "frames": [{
+    "frameId": 0,
+    "timestampUtc": "2026-08-05T00:00:00Z",
+    "observation": { "rainRate_mmph": 3.2 },
+    "derived": { "rainAttenuation_dB": 0.35 }
+  }]
+}`}
+                    </pre>
+                    <p>Historical Replay 会复现指定时段的轨道几何和统计信道损耗，用于观察过境期间仰角、斜距、FSPL 与大气损耗如何随时间变化；它不是保存下来的射线追踪测量。</p>
                 </div>
 
                 {/* 7. 数据导出 */}
