@@ -192,4 +192,54 @@ describe('ChannelSimPanel comparison mode transition', () => {
     expect(container.textContent).toContain('FREE-1');
     expect(container.querySelector('input[type="range"]').value).toBe('1');
   });
+
+  it('does not resume free CIR after a cached comparison report becomes active', async () => {
+    const props = (tec) => ({
+      tleLine1: 'tle-1',
+      tleLine2: 'tle-2',
+      satName: 'test-sat',
+      globalParams: { env: 'open', tec },
+      groundStation: { lat: 31, lon: 121, alt: 10 },
+    });
+    const renderWithTec = (tec) => act(() => root.render(
+      createElement(ChannelSimPanel, props(tec)),
+    ));
+
+    renderWithTec(20);
+    const generateButton = [...container.querySelectorAll('button')]
+      .find((button) => button.textContent.includes('Generate Channel'));
+    act(() => generateButton.click());
+    await act(async () => {
+      vi.advanceTimersByTime(50);
+      await Promise.resolve();
+    });
+
+    const toolsButton = [...container.querySelectorAll('button')]
+      .find((button) => button.textContent.includes('加载 MPDB'));
+    act(() => toolsButton.click());
+    await flushLazyModules();
+    act(() => container.querySelector('button[aria-label="测试导入 MPDB"]').click());
+    await flushLazyModules();
+    act(() => container.querySelector('button[aria-label="测试发布比较报告"]').click());
+    expect(container.querySelector('[data-testid="comparison-player"]')).not.toBeNull();
+
+    renderWithTec(21);
+    expect(container.querySelector('[data-testid="comparison-player"]')).toBeNull();
+    const playButton = [...container.querySelectorAll('button')]
+      .find((button) => button.textContent.includes('Play'));
+    act(() => playButton.click());
+    act(() => vi.advanceTimersByTime(1_000));
+    expect(container.querySelector('input[type="range"]').value).toBe('1');
+
+    renderWithTec(20);
+    expect(container.querySelector('[data-testid="comparison-player"]')).not.toBeNull();
+    renderWithTec(21);
+
+    const resumedPlayButton = [...container.querySelectorAll('button')]
+      .find((button) => button.textContent.includes('Play') || button.textContent.includes('Pause'));
+    expect(resumedPlayButton.textContent).toContain('Play');
+    expect(container.querySelector('input[type="range"]').value).toBe('1');
+    act(() => vi.advanceTimersByTime(2_000));
+    expect(container.querySelector('input[type="range"]').value).toBe('1');
+  });
 });

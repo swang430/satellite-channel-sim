@@ -277,6 +277,13 @@ export default function ChannelSimPanel({
 
     // === CIR playback ===
     useEffect(() => {
+        if (!activeComparisonReport) return;
+        // A cached report can become active after request parameters return to an older key.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setIsCirPlaying(false);
+    }, [activeComparisonReport]);
+
+    useEffect(() => {
         if (activeComparisonReport || !isCirPlaying || timeline.length === 0) return;
         const intervalMs = Math.max(20, Math.round(1000 / Math.max(1, cirFps)));
         const timer = setInterval(() => {
