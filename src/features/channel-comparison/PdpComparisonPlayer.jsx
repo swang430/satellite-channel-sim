@@ -5,8 +5,6 @@ import {
   nextComparisonPosition,
 } from './comparisonViewModel.js';
 
-const PLAYBACK_FPS_OPTIONS = Object.freeze([1, 2, 5, 10]);
-
 const CHART_OPTIONS = Object.freeze({
   responsive: true,
   maintainAspectRatio: false,
@@ -168,16 +166,22 @@ export default function PdpComparisonPlayer({ report }) {
         </button>
         <label style={{ fontSize: '0.82em' }}>
           播放速度
-          <select
+          <input
+            type="number"
             aria-label="播放速度"
+            min={1}
+            max={60}
+            step={1}
             value={fps}
-            onChange={(event) => setFps(Number(event.target.value))}
-            style={{ marginLeft: '5px' }}
-          >
-            {PLAYBACK_FPS_OPTIONS.map((option) => (
-              <option key={option} value={option}>{option} FPS</option>
-            ))}
-          </select>
+            onChange={(event) => {
+              const nextFps = Number(event.target.value);
+              if (Number.isInteger(nextFps) && nextFps >= 1 && nextFps <= 60) {
+                setFps(nextFps);
+              }
+            }}
+            style={{ marginLeft: '5px', width: '64px' }}
+          />
+          {' '}FPS
         </label>
         <span style={{ marginLeft: 'auto', fontFamily: 'monospace', fontSize: '0.82em' }}>
           位置 {activePosition + 1} / {frameCount} · MPDB FRAME {summary.frameId}

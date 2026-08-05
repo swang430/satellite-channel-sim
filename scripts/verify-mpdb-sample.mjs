@@ -6,6 +6,7 @@ import { importMpdbBundle } from '../src/importers/mpdb/importMpdbBundle.js';
 import {
   assertDynamicComparisonReport,
   assertExpectedMpdbSample,
+  assertExpectedReceiverTrackMotion,
   buildMismatchedConfigFiles,
   MPDB_SAMPLE_COMPARISON_OPTIONS,
   renameSampleFiles,
@@ -28,6 +29,7 @@ if (paths.length !== 3) {
   const comparisonElapsed_ms = performance.now() - comparisonStartedAt_ms;
   assertDynamicComparisonReport(comparisonReport, scenario.time.frameCount);
   const receiverTrackSummary = summarizeReceiverTrack(scenario.receiver.track);
+  assertExpectedReceiverTrackMotion(receiverTrackSummary);
 
   const renamedScenario = await importMpdbBundle(renameSampleFiles(files));
   assertExpectedMpdbSample(renamedScenario);

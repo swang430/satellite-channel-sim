@@ -74,6 +74,54 @@ export function assertExpectedMpdbSample(scenario) {
   }
 }
 
+export function assertExpectedReceiverTrackMotion(summary) {
+  const expectedFrameCount = 179;
+  const expectedMovingFrameCount = 108;
+  const expectedStationaryFrameCount = 70;
+  const counts = [
+    ['frameCount', summary?.frameCount],
+    ['movingFrameCount', summary?.movingFrameCount],
+    ['stationaryFrameCount', summary?.stationaryFrameCount],
+  ];
+  for (const [name, value] of counts) {
+    if (!Number.isInteger(value) || value < 0) {
+      throw new Error(`MPDB 接收机运动验收失败: ${name}=${value}, expected non-negative integer`);
+    }
+  }
+  if (summary.frameCount !== expectedFrameCount) {
+    throw new Error(
+      `MPDB 接收机运动验收失败: frameCount=${summary.frameCount}, expected ${expectedFrameCount}`,
+    );
+  }
+  const intervalCount = summary.movingFrameCount + summary.stationaryFrameCount;
+  if (intervalCount !== summary.frameCount - 1) {
+    throw new Error(
+      `MPDB 接收机运动验收失败: interval count=${intervalCount}, expected ${summary.frameCount - 1}`,
+    );
+  }
+  if (summary.movingFrameCount <= 0) {
+    throw new Error('MPDB 接收机运动验收失败: movingFrameCount must be positive');
+  }
+  if (summary.stationaryFrameCount <= 0) {
+    throw new Error('MPDB 接收机运动验收失败: stationaryFrameCount must be positive');
+  }
+  if (summary.movingFrameCount !== expectedMovingFrameCount) {
+    throw new Error(
+      `MPDB 接收机运动验收失败: movingFrameCount=${summary.movingFrameCount}, expected ${expectedMovingFrameCount}`,
+    );
+  }
+  if (summary.stationaryFrameCount !== expectedStationaryFrameCount) {
+    throw new Error(
+      `MPDB 接收机运动验收失败: stationaryFrameCount=${summary.stationaryFrameCount}, expected ${expectedStationaryFrameCount}`,
+    );
+  }
+  if (!Number.isFinite(summary.totalDistance_m) || summary.totalDistance_m <= 0) {
+    throw new Error(
+      `MPDB 接收机运动验收失败: totalDistance_m=${summary.totalDistance_m}, expected finite positive`,
+    );
+  }
+}
+
 export function assertDynamicComparisonReport(report, expectedFrameCount) {
   const frames = report?.frames;
   if (!Array.isArray(frames) || frames.length !== expectedFrameCount) {

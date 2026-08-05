@@ -218,6 +218,18 @@ describe('comparison PDP view model', () => {
       .toThrowError(expect.objectContaining({ code: 'COMPARISON_PLOT_DATA_INVALID' }));
   });
 
+  it('rejects a sparse playback frame at its exact array position', () => {
+    const report = comparisonReportFixture();
+    report.frames.push(structuredClone(report.frames[1]));
+    delete report.frames[1];
+
+    expect(() => buildComparisonPlaybackFrames(report, { showRtOverlay: true }))
+      .toThrowError(expect.objectContaining({
+        code: 'COMPARISON_PLOT_DATA_INVALID',
+        message: expect.stringContaining('frames[1]'),
+      }));
+  });
+
   it('exposes receiver motion, geometry, fit metrics, and normalization for the active frame', () => {
     const summary = buildComparisonPlaybackSummary(comparisonReportFixture(), 1);
 

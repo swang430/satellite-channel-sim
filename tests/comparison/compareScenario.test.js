@@ -64,7 +64,6 @@ function scenarioFixture() {
       doppler_Hz: new Float32Array([100, 200, 300]),
     },
   });
-  scenario.comparisonRevision = 1;
   return scenario;
 }
 
@@ -131,7 +130,6 @@ describe('scenario comparison report', () => {
     expect(progress).toEqual([0.5, 1]);
     expect(report).toMatchObject({
       scenarioId: 'sha256:test',
-      comparisonRevision: 1,
       modelVersion: 'mpdb-statistical-comparison/v2',
       provenance: expect.any(Object),
     });

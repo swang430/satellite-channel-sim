@@ -118,6 +118,17 @@ function advance(milliseconds) {
   act(() => vi.advanceTimersByTime(milliseconds));
 }
 
+function changeInput(input, value) {
+  act(() => {
+    const setValue = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      'value',
+    ).set;
+    setValue.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
 describe('PdpComparisonPlayer', () => {
   let container;
   let root;
@@ -179,23 +190,49 @@ describe('PdpComparisonPlayer', () => {
     expect(container.textContent).toContain('MPDB FRAME 8');
   });
 
-  it('cleans the old interval and advances at the selected FPS', () => {
+  it('accepts any integer FPS from 1 through 60 and advances at 37 FPS', () => {
     const clearIntervalSpy = vi.spyOn(window, 'clearInterval');
+    const setIntervalSpy = vi.spyOn(window, 'setInterval');
     render(comparisonReportFixture());
+    const speed = container.querySelector('input[aria-label="播放速度"]');
+    expect(speed).not.toBeNull();
+    expect(speed.type).toBe('number');
+    expect(speed.min).toBe('1');
+    expect(speed.max).toBe('60');
+    expect(speed.step).toBe('1');
+    expect(speed.value).toBe('2');
+
+    changeInput(speed, '37');
     click(container.querySelector('button[aria-label="播放 PDP 对比"]'));
-    advance(500);
 
-    const speed = container.querySelector('select[aria-label="播放速度"]');
-    act(() => {
-      speed.value = '5';
-      speed.dispatchEvent(new Event('change', { bubbles: true }));
-    });
-
-    expect(clearIntervalSpy).toHaveBeenCalled();
-    advance(199);
-    expect(container.textContent).toContain('MPDB FRAME 8');
-    advance(1);
+    advance(26);
     expect(container.textContent).toContain('MPDB FRAME 3');
+    advance(1);
+    expect(container.textContent).toContain('MPDB FRAME 8');
+
+    changeInput(speed, '60');
+    expect(clearIntervalSpy).toHaveBeenCalled();
+    expect(setIntervalSpy).toHaveBeenLastCalledWith(expect.any(Function), 1000 / 60);
+    changeInput(speed, '1');
+    expect(setIntervalSpy).toHaveBeenLastCalledWith(expect.any(Function), 1_000);
+  });
+
+  it.each(['0', '61', '1.5', ''])('ignores invalid playback FPS %j', (invalidFps) => {
+    const setIntervalSpy = vi.spyOn(window, 'setInterval');
+    render(comparisonReportFixture());
+    const speed = container.querySelector('input[aria-label="播放速度"]');
+    changeInput(speed, '1');
+    click(container.querySelector('button[aria-label="播放 PDP 对比"]'));
+    expect(setIntervalSpy).toHaveBeenLastCalledWith(expect.any(Function), 1_000);
+    const callCount = setIntervalSpy.mock.calls.length;
+
+    changeInput(speed, invalidFps);
+
+    expect(setIntervalSpy).toHaveBeenCalledTimes(callCount);
+    advance(999);
+    expect(container.textContent).toContain('MPDB FRAME 3');
+    advance(1);
+    expect(container.textContent).toContain('MPDB FRAME 8');
   });
 
   it('resets and stops for a new report or a replacement frames array', () => {
@@ -245,6 +282,19 @@ describe('PdpComparisonPlayer', () => {
 
     const alert = container.querySelector('[role="alert"]');
     expect(alert).not.toBeNull();
+    expect(alert.textContent).toContain('COMPARISON_PLOT_DATA_INVALID');
+  });
+
+  it('renders a structured alert for a sparse report instead of crashing', () => {
+    const report = comparisonReportFixture();
+    report.frames.push(structuredClone(report.frames[1]));
+    delete report.frames[1];
+
+    expect(() => render(report)).not.toThrow();
+
+    const alert = container.querySelector('[role="alert"]');
+    expect(alert).not.toBeNull();
+    expect(alert.textContent).toContain('frames[1]');
     expect(alert.textContent).toContain('COMPARISON_PLOT_DATA_INVALID');
   });
 });

@@ -1,4 +1,6 @@
-import { lazy, Suspense, useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import {
+    lazy, Suspense, useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo,
+} from 'react';
 import { Line, Bar } from 'react-chartjs-2';
 import { generateChannelTimeSeries, predictPasses, calibrateModel, applyCalibration, createDefaultCalibration, getCalibParamDefs } from './model.js';
 import { getSatelliteList, getSatelliteBandParams } from './knownSatellites.js';
@@ -100,6 +102,14 @@ export default function ChannelSimPanel({
     }), [calibProfile, env, mpdbScenario?.scenarioId, tec, useCalibration]);
     const statisticalParameters = comparisonRequest.statisticalParameters;
     const comparisonRequestKey = comparisonRequest.requestKey;
+    const previousComparisonRequestKeyRef = useRef(comparisonRequestKey);
+    useLayoutEffect(() => {
+        if (previousComparisonRequestKeyRef.current === comparisonRequestKey) return;
+        previousComparisonRequestKeyRef.current = comparisonRequestKey;
+        // Request identity changes permanently invalidate the computed report before paint.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setComparisonReport(null);
+    }, [comparisonRequestKey]);
     const activeComparisonReport = currentComparisonReport(
         comparisonReport,
         mpdbScenario?.scenarioId,

@@ -283,15 +283,24 @@ export function buildComparisonPlaybackFrames(report, { showRtOverlay = true } =
   if (typeof showRtOverlay !== 'boolean') {
     invalidComparisonData('showRtOverlay must be boolean');
   }
-  return report.frames.map((frame, position) => {
+  const playbackFrames = [];
+  for (let position = 0; position < report.frames.length; position += 1) {
+    if (!(position in report.frames)) {
+      invalidComparisonData(`frames[${position}] must be an object`);
+    }
+    const frame = report.frames[position];
+    if (frame === null || typeof frame !== 'object' || Array.isArray(frame)) {
+      invalidComparisonData(`frames[${position}] must be an object`);
+    }
     const frameView = buildComparisonFrameView(frame, { showRtOverlay });
-    return {
+    playbackFrames.push({
       position,
       frameId: frame.frameId,
       frame,
       frameView,
       chartData: buildComparisonChartData(frameView),
       summary: buildComparisonPlaybackSummary(report, position),
-    };
-  });
+    });
+  }
+  return playbackFrames;
 }

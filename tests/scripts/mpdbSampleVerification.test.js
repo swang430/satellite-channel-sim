@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   assertDynamicComparisonReport,
   assertExpectedMpdbSample,
+  assertExpectedReceiverTrackMotion,
   buildMismatchedConfigFiles,
   MPDB_SAMPLE_COMPARISON_OPTIONS,
   renameSampleFiles,
@@ -83,6 +84,36 @@ describe('MPDB sample acceptance helpers', () => {
       carrier: { frequency_Hz: 24_950_000_000 },
       coordinateReference: { alignmentRmsResidual_m: 0.01 },
     })).toThrow(/frameCount/);
+  });
+
+  it('asserts the approved real-sample receiver motion structure', () => {
+    expect(() => assertExpectedReceiverTrackMotion({
+      frameCount: 179,
+      movingFrameCount: 108,
+      stationaryFrameCount: 70,
+      totalDistance_m: 75.25,
+    })).not.toThrow();
+  });
+
+  it.each([
+    ['frame count', { frameCount: 178 }, /frameCount/],
+    ['moving count type', { movingFrameCount: 108.5 }, /movingFrameCount/],
+    ['stationary count sign', { stationaryFrameCount: -1 }, /stationaryFrameCount/],
+    ['interval sum', { movingFrameCount: 107 }, /interval count/],
+    ['no moving interval', { movingFrameCount: 0, stationaryFrameCount: 178 }, /movingFrameCount/],
+    ['no stationary interval', { movingFrameCount: 178, stationaryFrameCount: 0 }, /stationaryFrameCount/],
+    ['known moving count', { movingFrameCount: 107, stationaryFrameCount: 71 }, /movingFrameCount/],
+    ['known stationary count', { movingFrameCount: 109, stationaryFrameCount: 69 }, /movingFrameCount/],
+    ['non-finite distance', { totalDistance_m: Number.NaN }, /totalDistance_m/],
+    ['non-positive distance', { totalDistance_m: 0 }, /totalDistance_m/],
+  ])('rejects invalid real-sample receiver motion: %s', (_label, override, message) => {
+    expect(() => assertExpectedReceiverTrackMotion({
+      frameCount: 179,
+      movingFrameCount: 108,
+      stationaryFrameCount: 70,
+      totalDistance_m: 75.25,
+      ...override,
+    })).toThrow(message);
   });
 
   it('accepts a complete dynamic comparison report with finite fit metrics', () => {

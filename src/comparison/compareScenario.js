@@ -92,7 +92,6 @@ export async function compareScenario(scenario, {
   }
   return {
     scenarioId: scenario.scenarioId,
-    comparisonRevision: scenario.comparisonRevision,
     modelVersion: COMPARISON_MODEL_VERSION,
     realizationCount: normalizedEnsembleParameters.realizationCount,
     seedScheme: 'scenario/frame/realization',

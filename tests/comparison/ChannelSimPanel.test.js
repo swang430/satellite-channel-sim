@@ -193,7 +193,7 @@ describe('ChannelSimPanel comparison mode transition', () => {
     expect(container.querySelector('input[type="range"]').value).toBe('1');
   });
 
-  it('does not resume free CIR after a cached comparison report becomes active', async () => {
+  it('permanently invalidates an old report across an A to B to A request transition', async () => {
     const props = (tec) => ({
       tleLine1: 'tle-1',
       tleLine2: 'tle-2',
@@ -230,10 +230,13 @@ describe('ChannelSimPanel comparison mode transition', () => {
     act(() => playButton.click());
     act(() => vi.advanceTimersByTime(1_000));
     expect(container.querySelector('input[type="range"]').value).toBe('1');
+    const pauseButton = [...container.querySelectorAll('button')]
+      .find((button) => button.textContent.includes('Pause'));
+    act(() => pauseButton.click());
 
     renderWithTec(20);
-    expect(container.querySelector('[data-testid="comparison-player"]')).not.toBeNull();
-    renderWithTec(21);
+    expect(container.querySelector('[data-testid="comparison-player"]')).toBeNull();
+    expect(container.querySelector('button[aria-label="测试发布比较报告"]')).not.toBeNull();
 
     const resumedPlayButton = [...container.querySelectorAll('button')]
       .find((button) => button.textContent.includes('Play') || button.textContent.includes('Pause'));
