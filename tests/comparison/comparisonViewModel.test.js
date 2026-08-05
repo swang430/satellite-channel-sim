@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildComparisonChartData,
   buildComparisonFrameView,
+  buildComparisonPlaybackFrames,
   buildComparisonPlaybackSummary,
   buildComparisonPlotData,
   nextComparisonPosition,
@@ -167,6 +168,56 @@ describe('comparison PDP view model', () => {
     expect(nextComparisonPosition(report, 1)).toBe(0);
   });
 
+  it('precomputes every playback frame at the same report position without mutation', () => {
+    const report = comparisonReportFixture();
+    const snapshot = structuredClone(report);
+
+    const playbackFrames = buildComparisonPlaybackFrames(report, { showRtOverlay: true });
+
+    expect(playbackFrames.map(({ position, frameId }) => ({ position, frameId }))).toEqual([
+      { position: 0, frameId: 3 },
+      { position: 1, frameId: 8 },
+    ]);
+    expect(playbackFrames[1]).toMatchObject({
+      frame: report.frames[1],
+      frameView: { frameId: 8 },
+      summary: { frameId: 8, receiverMotion: 'moving' },
+    });
+    expect(playbackFrames[1].chartData.datasets.every((dataset) => (
+      dataset.frameId === 8
+    ))).toBe(true);
+    expect(report).toEqual(snapshot);
+  });
+
+  it('rebuilds playback data when one report object receives a replacement frames array', () => {
+    const report = comparisonReportFixture();
+    const original = buildComparisonPlaybackFrames(report, { showRtOverlay: false });
+
+    report.frames = [comparisonFrameFixture({
+      frameId: 21,
+      timestampUtc: '2026-08-05T00:00:21.000Z',
+    })];
+    const replaced = buildComparisonPlaybackFrames(report, { showRtOverlay: false });
+
+    expect(original.map((item) => item.frameId)).toEqual([3, 8]);
+    expect(replaced).toHaveLength(1);
+    expect(replaced[0]).toMatchObject({
+      position: 0,
+      frameId: 21,
+      summary: { frameId: 21, receiverMotion: 'initial' },
+    });
+    expect(replaced[0].chartData.datasets.some((dataset) => dataset.source === 'rt'))
+      .toBe(false);
+  });
+
+  it('rejects the entire precomputed playback when any frame is invalid', () => {
+    const report = comparisonReportFixture();
+    report.frames[1].statistical.excessDelay_s = [];
+
+    expect(() => buildComparisonPlaybackFrames(report, { showRtOverlay: true }))
+      .toThrowError(expect.objectContaining({ code: 'COMPARISON_PLOT_DATA_INVALID' }));
+  });
+
   it('exposes receiver motion, geometry, fit metrics, and normalization for the active frame', () => {
     const summary = buildComparisonPlaybackSummary(comparisonReportFixture(), 1);
 
@@ -189,6 +240,21 @@ describe('comparison PDP view model', () => {
       receiverMotion: 'initial',
       receiverDisplacement_m: 0,
     });
+  });
+
+  it.each([
+    ['an object normalization reason', (report) => {
+      report.frames[1].rt.absolutePower.reason = { code: 'UNDEFINED_H_NORMALIZATION' };
+    }],
+    ['non-array diagnostics', (report) => {
+      report.diagnostics = { reason: 'UNDEFINED_H_NORMALIZATION' };
+    }],
+  ])('rejects %s with a structured plotting error', (_label, mutate) => {
+    const report = comparisonReportFixture();
+    mutate(report);
+
+    expect(() => buildComparisonPlaybackSummary(report, 1))
+      .toThrowError(expect.objectContaining({ code: 'COMPARISON_PLOT_DATA_INVALID' }));
   });
 
   it('classifies receiver movement at the inclusive 0.1 metre threshold', () => {

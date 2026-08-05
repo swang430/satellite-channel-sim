@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Line } from 'react-chartjs-2';
 import {
-  buildComparisonChartData,
-  buildComparisonFrameView,
-  buildComparisonPlaybackSummary,
+  buildComparisonPlaybackFrames,
   nextComparisonPosition,
 } from './comparisonViewModel.js';
 
@@ -71,27 +69,24 @@ export default function PdpComparisonPlayer({ report }) {
   const [fps, setFps] = useState(2);
   const [showRtOverlay, setShowRtOverlay] = useState(true);
   const [previousReport, setPreviousReport] = useState(report);
+  const reportFrames = report?.frames;
+  const [previousReportFrames, setPreviousReportFrames] = useState(reportFrames);
 
-  if (report !== previousReport) {
+  if (report !== previousReport || reportFrames !== previousReportFrames) {
     setPreviousReport(report);
+    setPreviousReportFrames(reportFrames);
     setPosition(0);
     setIsPlaying(false);
   }
 
-  const playback = useMemo(() => {
+  const precomputedPlayback = useMemo(() => {
     try {
-      const frameCount = Array.isArray(report?.frames) ? report.frames.length : 0;
-      const activePosition = frameCount > 0
-        ? Math.min(Math.max(position, 0), frameCount - 1)
-        : 0;
-      const frame = report?.frames?.[activePosition];
-      const view = buildComparisonFrameView(frame, { showRtOverlay });
+      const playbackReport = report && typeof report === 'object'
+        ? { ...report, frames: reportFrames }
+        : report;
       return {
         ok: true,
-        activePosition,
-        frameCount,
-        chartData: buildComparisonChartData(view),
-        summary: buildComparisonPlaybackSummary(report, activePosition),
+        frames: buildComparisonPlaybackFrames(playbackReport, { showRtOverlay }),
       };
     } catch (error) {
       if (error?.code !== 'COMPARISON_PLOT_DATA_INVALID') throw error;
@@ -101,34 +96,42 @@ export default function PdpComparisonPlayer({ report }) {
         code: error.code,
       };
     }
-  }, [position, report, showRtOverlay]);
+  }, [report, reportFrames, showRtOverlay]);
+
+  const frameCount = precomputedPlayback.ok ? precomputedPlayback.frames.length : 0;
+  const activePosition = frameCount > 0
+    ? Math.min(Math.max(position, 0), frameCount - 1)
+    : 0;
+  const activeFrame = precomputedPlayback.ok
+    ? precomputedPlayback.frames[activePosition]
+    : null;
 
   useEffect(() => {
-    if (!isPlaying || !playback.ok || playback.frameCount <= 1) return undefined;
+    if (!isPlaying || !precomputedPlayback.ok || frameCount <= 1) return undefined;
     const intervalId = window.setInterval(() => {
       setPosition((currentPosition) => {
         const safePosition = Math.min(
           Math.max(currentPosition, 0),
-          report.frames.length - 1,
+          frameCount - 1,
         );
         return nextComparisonPosition(report, safePosition);
       });
     }, 1000 / fps);
     return () => window.clearInterval(intervalId);
-  }, [fps, isPlaying, playback.frameCount, playback.ok, report]);
+  }, [fps, frameCount, isPlaying, precomputedPlayback.ok, report, reportFrames]);
 
-  if (!playback.ok) {
+  if (!precomputedPlayback.ok) {
     return (
       <section style={panelStyle} aria-label="CIR-Power Delay Profile 动态对比">
         <strong style={{ color: '#ffc56d' }}>CIR- Power Delay Profile</strong>
         <div role="alert" style={{ color: '#ff9e9e', marginTop: '8px' }}>
-          无法播放对比报告：{playback.message}（{playback.code}）
+          无法播放对比报告：{precomputedPlayback.message}（{precomputedPlayback.code}）
         </div>
       </section>
     );
   }
 
-  const { activePosition, chartData, frameCount, summary } = playback;
+  const { chartData, summary } = activeFrame;
   const canPlay = frameCount > 1;
 
   return (

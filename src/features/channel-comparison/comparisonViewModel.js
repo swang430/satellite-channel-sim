@@ -144,6 +144,34 @@ function receiverMotion(report, position) {
   ], 1);
 }
 
+function normalizationStatus(report, frame) {
+  const diagnostics = report?.diagnostics;
+  if (diagnostics !== undefined && !Array.isArray(diagnostics)) {
+    invalidComparisonData('Comparison report diagnostics must be an array');
+  }
+  diagnostics?.forEach((diagnostic, index) => {
+    if (!diagnostic || typeof diagnostic !== 'object' || Array.isArray(diagnostic)) {
+      invalidComparisonData(`diagnostics[${index}] must be an object`);
+    }
+    if (diagnostic.reason !== undefined && typeof diagnostic.reason !== 'string') {
+      invalidComparisonData(`diagnostics[${index}].reason must be a string`);
+    }
+  });
+
+  const frameReason = frame?.rt?.absolutePower?.reason;
+  if (frameReason !== undefined && typeof frameReason !== 'string') {
+    invalidComparisonData('rt.absolutePower.reason must be a string');
+  }
+  const diagnosticReason = diagnostics?.find((diagnostic) => (
+    diagnostic.reason === UNDEFINED_H_NORMALIZATION
+  ))?.reason;
+  const status = frameReason ?? diagnosticReason ?? UNDEFINED_H_NORMALIZATION;
+  if (status !== UNDEFINED_H_NORMALIZATION) {
+    invalidComparisonData(`Unsupported RT normalization status: ${status}`);
+  }
+  return status;
+}
+
 export function buildComparisonPlotData(frame) {
   return {
     rt: rtSeries(frame),
@@ -222,11 +250,7 @@ export function buildComparisonPlaybackSummary(report, position) {
   const receiver = frame.receiver;
   projectedPosition(frame, 'receiver position');
   const motion = receiverMotion(report, position);
-  const normalizationStatus = frame.rt?.absolutePower?.reason
-    ?? report.diagnostics?.find((diagnostic) => (
-      diagnostic?.reason === UNDEFINED_H_NORMALIZATION
-    ))?.reason
-    ?? UNDEFINED_H_NORMALIZATION;
+  const rtNormalizationStatus = normalizationStatus(report, frame);
 
   return {
     frameId: frame.frameId,
@@ -250,6 +274,24 @@ export function buildComparisonPlaybackSummary(report, position) {
       frame.metrics?.weightedDelayDistance_s,
       'metrics.weightedDelayDistance_s',
     ),
-    rtNormalizationStatus: normalizationStatus,
+    rtNormalizationStatus,
   };
+}
+
+export function buildComparisonPlaybackFrames(report, { showRtOverlay = true } = {}) {
+  validateReportPosition(report, 0);
+  if (typeof showRtOverlay !== 'boolean') {
+    invalidComparisonData('showRtOverlay must be boolean');
+  }
+  return report.frames.map((frame, position) => {
+    const frameView = buildComparisonFrameView(frame, { showRtOverlay });
+    return {
+      position,
+      frameId: frame.frameId,
+      frame,
+      frameView,
+      chartData: buildComparisonChartData(frameView),
+      summary: buildComparisonPlaybackSummary(report, position),
+    };
+  });
 }
