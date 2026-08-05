@@ -5,6 +5,14 @@ import { getSatelliteList, getSatelliteBandParams } from './knownSatellites.js';
 import { SimulationValidator } from './ValidationModule.js';
 import MpdbImportPanel from './features/mpdb-import/MpdbImportPanel.jsx';
 import ChannelComparisonPanel from './features/channel-comparison/ChannelComparisonPanel.jsx';
+import {
+    groundStationDistanceKm,
+    parseCalibrationDataset,
+} from './calibration/measurementAdapter.js';
+import {
+    loadCalibrationProfile,
+    saveCalibrationProfile,
+} from './calibration/storage.js';
 
 /**
  * Channel Propagation Simulator Panel
@@ -53,7 +61,16 @@ export default function ChannelSimPanel({
     }, [globalParams?.env]);
 
     // === Calibration State ===
-    const [calibProfile, setCalibProfile] = useState(createDefaultCalibration());
+    const [calibProfile, setCalibProfile] = useState(() => {
+        try {
+            const stored = loadCalibrationProfile();
+            return stored
+                ? { ...stored, residualRMS: stored.residualRms, timestamp: stored.createdAt }
+                : createDefaultCalibration();
+        } catch {
+            return createDefaultCalibration();
+        }
+    });
     const [useCalibration, setUseCalibration] = useState(false);
     const [calibMeasurements, setCalibMeasurements] = useState([]);
     const [calibSatId, setCalibSatId] = useState('');
@@ -61,6 +78,15 @@ export default function ChannelSimPanel({
     const [calibStatus, setCalibStatus] = useState('');
     const [showCalibPanel, setShowCalibPanel] = useState(false);
     const [calibMetadata, setCalibMetadata] = useState(null);
+
+    useEffect(() => {
+        if (!calibProfile.calibrated) return;
+        try {
+            saveCalibrationProfile(calibProfile);
+        } catch (error) {
+            console.warn('Calibration profile persistence failed:', error);
+        }
+    }, [calibProfile]);
 
     // === Output State ===
     const [generatedTimeline, setGeneratedTimeline] = useState([]);
@@ -802,15 +828,15 @@ export default function ChannelSimPanel({
                                             reader.onload = ev => {
                                                 try {
                                                     const json = JSON.parse(ev.target.result);
-                                                    // 兼容两种格式：纯数组 或 { metadata, measurements }
-                                                    const data = Array.isArray(json) ? json : (json.measurements || []);
+                                                    const parsed = parseCalibrationDataset(json);
+                                                    const data = parsed.measurements;
                                                     setCalibMeasurements(data);
-                                                    setCalibMetadata(json.metadata || null);
+                                                    setCalibMetadata(parsed.metadata);
 
                                                     const statusParts = [`✅ 已加载 ${data.length} 个测量数据点`];
+                                                    statusParts.push(...parsed.diagnostics.map(diagnostic => `⚠️ ${diagnostic.message}`));
 
-                                                    // 解析 metadata → 自动填充 UI
-                                                    const meta = json.metadata;
+                                                    const meta = parsed.metadata;
                                                     if (meta) {
                                                         // 卫星参数
                                                         if (meta.satellite) {
@@ -837,36 +863,33 @@ export default function ChannelSimPanel({
                                                                 // 自定义卫星：{ name, freq, eirp, polarization, bandwidth, ... }
                                                                 const sat = meta.satellite;
                                                                 setCalibSatId('');
+                                                                const satFrequency = sat.frequency_GHz ?? sat.freq;
+                                                                const satEirp = sat.eirp_dBW ?? sat.eirp;
+                                                                const satBandwidth = sat.bandwidth_Hz != null ? sat.bandwidth_Hz / 1e6 : sat.bandwidth;
                                                                 const nextParams = {};
-                                                                if (sat.freq != null) nextParams.freq = sat.freq;
-                                                                if (sat.eirp != null) nextParams.eirp = sat.eirp;
-                                                                if (sat.bandwidth != null) nextParams.bandwidth = sat.bandwidth;
+                                                                if (satFrequency != null) nextParams.freq = satFrequency;
+                                                                if (satEirp != null) nextParams.eirp = satEirp;
+                                                                if (satBandwidth != null) nextParams.bandwidth = satBandwidth;
                                                                 if (Object.keys(nextParams).length > 0) onLinkParamsChange?.(nextParams);
                                                                 // 必填字段校验
                                                                 const missing = [];
-                                                                if (sat.freq == null) missing.push('freq(频率)');
-                                                                if (sat.eirp == null) missing.push('eirp(发射功率)');
+                                                                if (satFrequency == null) missing.push('frequency_GHz(频率)');
+                                                                if (satEirp == null) missing.push('eirp_dBW(发射功率)');
                                                                 if (!sat.polarization) missing.push('polarization(极化)');
-                                                                if (sat.bandwidth == null) missing.push('bandwidth(带宽)');
+                                                                if (satBandwidth == null) missing.push('bandwidth_Hz(带宽)');
                                                                 if (missing.length > 0) {
                                                                     statusParts.push(`⛔ 自定义卫星缺少必填字段: ${missing.join(', ')} — 无法校准!`);
                                                                 } else {
-                                                                    statusParts.push(`🛰️ 自定义卫星 "${sat.name || '未命名'}" (${sat.freq}GHz, ${sat.eirp}dBW, ${sat.polarization}, BW=${sat.bandwidth}MHz)`);
+                                                                    statusParts.push(`🛰️ 自定义卫星 "${sat.name || '未命名'}" (${satFrequency}GHz, ${satEirp}dBW, ${sat.polarization}, BW=${satBandwidth}MHz)`);
                                                                 }
                                                             }
                                                         }
-                                                        // 地面站校验
+                                                        // 地面站只做来源一致性检查，不隐式覆盖当前仿真位置
                                                         if (meta.groundStation) {
                                                             const gs = meta.groundStation;
-                                                            if (gs.lat != null || gs.lon != null || gs.alt != null) {
-                                                                updateGroundStation({
-                                                                    lat: gs.lat != null ? gs.lat : gsLat,
-                                                                    lon: gs.lon != null ? gs.lon : gsLon,
-                                                                    alt: gs.alt != null ? gs.alt : gsAlt
-                                                                });
-                                                            }
                                                             if (gs.lat != null && gs.lon != null) {
-                                                                statusParts.push(`📍 地面站 (${gs.lat}, ${gs.lon})`);
+                                                                const distanceKm = groundStationDistanceKm(gs, { lat: gsLat, lon: gsLon, alt: gsAlt });
+                                                                statusParts.push(`📍 校准站 (${gs.lat}, ${gs.lon})，距当前站 ${distanceKm.toFixed(2)} km`);
                                                             } else {
                                                                 statusParts.push('⚠️ 地面站缺少 lat/lon — 无法验证地理一致性');
                                                             }
@@ -876,17 +899,21 @@ export default function ChannelSimPanel({
                                                         // 接收机参数
                                                         if (meta.receiver) {
                                                             const rx = meta.receiver;
-                                                            if (rx.gRx != null) setGRx(rx.gRx);
-                                                            if (rx.tRx != null) setTRx(rx.tRx);
-                                                            if (rx.bandwidth != null) setBandwidth(rx.bandwidth);
+                                                            const receiverParams = {};
+                                                            if ((rx.rxGain_dBi ?? rx.gRx) != null) receiverParams.gRx = rx.rxGain_dBi ?? rx.gRx;
+                                                            if ((rx.systemNoiseTemperature_K ?? rx.tRx) != null) receiverParams.tRx = rx.systemNoiseTemperature_K ?? rx.tRx;
+                                                            if (rx.bandwidth_Hz != null || rx.bandwidth != null) {
+                                                                receiverParams.bandwidth = rx.bandwidth_Hz != null ? rx.bandwidth_Hz / 1e6 : rx.bandwidth;
+                                                            }
+                                                            if (Object.keys(receiverParams).length > 0) onLinkParamsChange?.(receiverParams);
                                                         }
 
                                                         // 测量点数据质量校验
-                                                        const noElevCount = data.filter(m => m.elevation == null).length;
+                                                        const noElevCount = data.filter(m => m.elevation_deg == null).length;
                                                         const noMetricCount = data.filter(m =>
-                                                            m.measuredCN0_dB == null && m.measuredRSSI_dBm == null &&
-                                                            m.measuredXPD_dB == null && m.measuredAttenuation_dB == null &&
-                                                            m.measuredLoss == null
+                                                            m.cn0_dBHz == null && m.cn_dB == null && m.snr_dB == null &&
+                                                            m.rssi_dBm == null && m.xpd_dB == null &&
+                                                            m.attenuation_dB == null && m.scatterPower_dB == null
                                                         ).length;
                                                         if (noElevCount > 0) {
                                                             statusParts.push(`⚠️ ${noElevCount}个点缺少 elevation(仰角)，将使用默认值`);
@@ -896,7 +923,7 @@ export default function ChannelSimPanel({
                                                         }
                                                         // 环境
                                                         if (meta.environment) setEnv(meta.environment);
-                                                        if (meta.tec != null) setTec(meta.tec);
+                                                        if (meta.tec_TECU != null) onLinkParamsChange?.({ tec: meta.tec_TECU });
                                                         if (meta.description) statusParts.push(`📝 ${meta.description}`);
                                                     }
 
@@ -917,11 +944,13 @@ export default function ChannelSimPanel({
                                     <div style={{ fontSize: '0.8em', color: '#aaa', marginTop: '4px' }}>
                                         {'\ud83d\udcca'} {calibMeasurements.length} 点 |
                                         指标: {[
-                                            calibMeasurements.some(m => m.measuredCN0_dB != null) && 'C/N0',
-                                            calibMeasurements.some(m => m.measuredRSSI_dBm != null) && 'RSSI',
-                                            calibMeasurements.some(m => m.measuredXPD_dB != null) && 'XPD',
-                                            calibMeasurements.some(m => m.measuredAttenuation_dB != null) && 'Atten',
-                                            calibMeasurements.some(m => m.measuredLoss != null) && 'Loss(旧)'
+                                            calibMeasurements.some(m => m.cn0_dBHz != null) && 'C/N0 (dB-Hz)',
+                                            calibMeasurements.some(m => m.cn_dB != null) && 'C/N (dB)',
+                                            calibMeasurements.some(m => m.snr_dB != null) && 'SNR (dB)',
+                                            calibMeasurements.some(m => m.rssi_dBm != null) && 'RSSI',
+                                            calibMeasurements.some(m => m.xpd_dB != null) && 'XPD',
+                                            calibMeasurements.some(m => m.attenuation_dB != null) && 'Atten',
+                                            calibMeasurements.some(m => m.scatterPower_dB != null) && 'Scatter'
                                         ].filter(Boolean).join(', ') || '无'}
                                     </div>
                                 )}
@@ -951,8 +980,7 @@ export default function ChannelSimPanel({
                                                 setCalibBandKey(e.target.value);
                                                 const bp = getSatelliteBandParams(calibSatId, e.target.value);
                                                 if (bp) {
-                                                    setFreq(bp.freq);
-                                                    setEirp(bp.eirp);
+                                                    onLinkParamsChange?.({ freq: bp.freq, eirp: bp.eirp, bandwidth: bp.bandwidth });
                                                     setCalibStatus(`\u2705 已应用 ${bp.satName} ${e.target.value} 频段: ${bp.freq}GHz, ${bp.eirp}dBW, ${bp.polarization}`);
                                                 }
                                             }}
@@ -984,10 +1012,10 @@ export default function ChannelSimPanel({
                                     // 自定义卫星必填校验
                                     if (meta && typeof meta.satellite === 'object') {
                                         const sat = meta.satellite;
-                                        if (sat.freq == null) errors.push('freq(频率)');
-                                        if (sat.eirp == null) errors.push('eirp(发射功率)');
+                                        if ((sat.frequency_GHz ?? sat.freq) == null) errors.push('frequency_GHz(频率)');
+                                        if ((sat.eirp_dBW ?? sat.eirp) == null) errors.push('eirp_dBW(发射功率)');
                                         if (!sat.polarization) errors.push('polarization(极化)');
-                                        if (sat.bandwidth == null) errors.push('bandwidth(带宽)');
+                                        if (sat.bandwidth_Hz == null && sat.bandwidth == null) errors.push('bandwidth_Hz(带宽)');
                                     }
 
                                     // 地面站校验
@@ -999,17 +1027,19 @@ export default function ChannelSimPanel({
 
                                     // 测量点校验
                                     const validPoints = calibMeasurements.filter(m =>
-                                        m.measuredCN0_dB != null || m.measuredRSSI_dBm != null ||
-                                        m.measuredXPD_dB != null || m.measuredAttenuation_dB != null ||
-                                        m.measuredLoss != null
+                                        m.cn0_dBHz != null || m.cn_dB != null || m.snr_dB != null ||
+                                        m.rssi_dBm != null || m.xpd_dB != null ||
+                                        m.attenuation_dB != null || m.scatterPower_dB != null
                                     );
                                     if (validPoints.length === 0) {
                                         errors.push('所有测量点均无有效指标(C/N0, RSSI, XPD, Atten)');
                                     }
-                                    const noElevPts = validPoints.filter(m => m.elevation == null).length;
+                                    const noElevPts = validPoints.filter(m => m.elevation_deg == null).length;
                                     if (noElevPts === validPoints.length && validPoints.length > 0) {
-                                        warnings.push('所有点缺少 elevation，将使用默认值 30°');
+                                        errors.push('所有点缺少 elevation_deg；校准不会假设默认仰角');
                                     }
+                                    const noRangePts = validPoints.filter(m => m.slantRange_km == null).length;
+                                    if (noRangePts > 0) errors.push(`${noRangePts} 个点缺少 slantRange_km；不会回退 GEO 距离`);
 
                                     // 无卫星参考校验
                                     if (!calibSatId && !meta?.satellite) {
@@ -1025,13 +1055,21 @@ export default function ChannelSimPanel({
                                     const warnText = warnings.length > 0 ? `⚠️ ${warnings.join('; ')} | ` : '';
                                     setCalibStatus(`${warnText}⏳ 正在校准...`);
                                     setTimeout(() => {
-                                        const refSat = calibSatId && calibBandKey ? getSatelliteBandParams(calibSatId, calibBandKey) : null;
-                                        const profile = calibrateModel(calibMeasurements, { freq, eirp, gRx, tRx, bandwidth, tec, env, rainRate }, refSat);
-                                        setCalibProfile(profile);
-                                        setUseCalibration(true);
-                                        const defs = getCalibParamDefs();
-                                        const paramSummary = defs.map(d => `${d.label}: ${profile.params[d.key].toFixed(3)}`).join(' | ');
-                                        setCalibStatus(`\u2705 校准完成! RMS残差=${profile.residualRMS.toFixed(3)} | ${paramSummary}`);
+                                        try {
+                                            const refSat = calibSatId && calibBandKey ? getSatelliteBandParams(calibSatId, calibBandKey) : null;
+                                            const profile = calibrateModel(calibMeasurements, { freq, eirp, gRx, tRx, bandwidth, tec, env, rainRate }, refSat);
+                                            setCalibProfile(profile);
+                                            setUseCalibration(profile.calibrated);
+                                            const estimated = getCalibParamDefs()
+                                                .filter(definition => profile.parameterStatus[definition.key] === 'estimated')
+                                                .map(definition => `${definition.label}: ${profile.params[definition.key].toFixed(3)}`);
+                                            const frozenCount = Object.values(profile.parameterStatus).filter(status => status === 'frozen').length;
+                                            setCalibStatus(profile.calibrated
+                                                ? `✅ 校准完成，RMS=${profile.residualRms.toFixed(3)}；已估计 ${estimated.join(' | ')}；冻结 ${frozenCount} 项`
+                                                : '⚠️ 数据不足以辨识任何参数，全部参数保持冻结');
+                                        } catch (error) {
+                                            setCalibStatus(`⛔ 校准失败 — ${error.message}`);
+                                        }
                                     }, 50);
                                 }}
                                 disabled={calibMeasurements.length === 0}

@@ -328,7 +328,11 @@ export default function UserManual({ onClose }) {
     "groundStation": {
       "lat": 22.54, "lon": 114.05, "alt": 0
     },
-    "receiver": { "gRx": 42.0, "tRx": 150.0, "bandwidth": 400.0 },
+    "receiver": {
+      "rxGain_dBi": 42.0,
+      "systemNoiseTemperature_K": 150.0,
+      "bandwidth_Hz": 400000000
+    },
     "environment": "suburban",
     "tec": 50,
     "description": "深圳站 CSS 天和过境观测"
@@ -336,12 +340,15 @@ export default function UserManual({ onClose }) {
   "measurements": [
     {
       "timestamp": "2026-02-23T10:00:00Z",
-      "elevation": 35.2,               // 必填: 仰角(°)
-      "rainRate": 3.0,                  // 建议: 降雨率(mm/h)
-      "measuredCN0_dB": 11.5,           // 测量指标(至少一个)
-      "measuredRSSI_dBm": -87.2,
-      "measuredXPD_dB": 27.5,
-      "measuredAttenuation_dB": 3.8
+      "frameId": 0,
+      "elevation_deg": 35.2,            // 必填: 仰角(°)
+      "slantRange_km": 710.4,           // 必填: 每点真实斜距，不回退 GEO
+      "rainRate_mmph": 3.0,
+      "cn0_dBHz": 71.5,                 // C/N0，单位 dB-Hz
+      "cn_dB": 15.5,                    // 带宽积分后的 C/N，单位 dB
+      "rssi_dBm": -87.2,
+      "xpd_dB": 27.5,
+      "attenuation_dB": 3.8
     }
   ]
 }`}
@@ -353,10 +360,10 @@ export default function UserManual({ onClose }) {
   "metadata": {
     "satellite": {
       "name": "MyCustomSat",           // 卫星名称
-      "freq": 10.95,                   // ⛔ 必填: 频率(GHz)
-      "eirp": 36.0,                    // ⛔ 必填: EIRP(dBW)
+      "frequency_GHz": 10.95,          // ⛔ 必填: 频率(GHz)
+      "eirp_dBW": 36.0,                // ⛔ 必填: EIRP(dBW)
       "polarization": "Linear-V",      // ⛔ 必填: 极化方式
-      "bandwidth": 250.0,              // ⛔ 必填: 带宽(MHz)
+      "bandwidth_Hz": 250000000,       // ⛔ 必填: 带宽(Hz)
       "modulation": "OFDM",            // 可选: 调制方式
       "type": "LEO"                    // 可选: 轨道类型
     },
@@ -370,13 +377,13 @@ export default function UserManual({ onClose }) {
                     <h3 style={h3Style}>格式三：纯数组（向后兼容）</h3>
                     <pre style={{ background: 'rgba(0,0,0,0.3)', padding: '12px', borderRadius: '5px', fontSize: '0.8em', overflowX: 'auto', color: '#aaa', lineHeight: '1.5' }}>
                         {`[
-  { "elevation": 35.2, "rainRate": 3.0, "measuredCN0_dB": 11.5 },
+  { "elevation": 35.2, "slantRange": 710.4, "rainRate": 3.0, "measuredCN0_dB": 71.5 },
   ...
 ]`}
                     </pre>
                     <div style={warnStyle}>
                         <strong>⚠️ 纯数组格式</strong>不携带卫星和地面站信息，需手动在面板中设置参数。
-                        系统无法进行地理一致性校验。
+                        系统无法进行地理一致性校验；旧字段由 adapter 显式转换，并记录单位假设诊断。
                     </div>
 
                     <h3 style={h3Style}>测量指标说明</h3>
@@ -385,12 +392,14 @@ export default function UserManual({ onClose }) {
                             <th style={thStyle}>字段</th><th style={thStyle}>说明</th><th style={thStyle}>必填</th>
                         </tr></thead>
                         <tbody>
-                            <tr><td style={tdStyle}><code>elevation</code></td><td style={tdStyle}>仰角 (°)</td><td style={tdStyle}>强烈建议</td></tr>
-                            <tr><td style={tdStyle}><code>rainRate</code></td><td style={tdStyle}>降雨率 (mm/h)</td><td style={tdStyle}>建议</td></tr>
-                            <tr><td style={tdStyle}><code>measuredCN0_dB</code></td><td style={tdStyle}>载噪比 (dB-Hz)</td><td style={{ ...tdStyle, color: '#4ecdc4' }}>至少一个</td></tr>
-                            <tr><td style={tdStyle}><code>measuredRSSI_dBm</code></td><td style={tdStyle}>接收信号强度 (dBm)</td><td style={{ ...tdStyle, color: '#4ecdc4' }}>至少一个</td></tr>
-                            <tr><td style={tdStyle}><code>measuredXPD_dB</code></td><td style={tdStyle}>交叉极化鉴别度 (dB)</td><td style={{ ...tdStyle, color: '#4ecdc4' }}>至少一个</td></tr>
-                            <tr><td style={tdStyle}><code>measuredAttenuation_dB</code></td><td style={tdStyle}>总衰减 (dB)</td><td style={{ ...tdStyle, color: '#4ecdc4' }}>至少一个</td></tr>
+                            <tr><td style={tdStyle}><code>elevation_deg</code></td><td style={tdStyle}>仰角 (°)</td><td style={tdStyle}>必填</td></tr>
+                            <tr><td style={tdStyle}><code>slantRange_km</code></td><td style={tdStyle}>该点斜距 (km)</td><td style={tdStyle}>必填</td></tr>
+                            <tr><td style={tdStyle}><code>rainRate_mmph</code></td><td style={tdStyle}>降雨率 (mm/h)</td><td style={tdStyle}>建议</td></tr>
+                            <tr><td style={tdStyle}><code>cn0_dBHz</code></td><td style={tdStyle}>载噪密度比 C/N0 (dB-Hz)</td><td style={{ ...tdStyle, color: '#4ecdc4' }}>至少一个</td></tr>
+                            <tr><td style={tdStyle}><code>cn_dB</code> / <code>snr_dB</code></td><td style={tdStyle}>带宽积分后的 C/N 或 SNR (dB)</td><td style={{ ...tdStyle, color: '#4ecdc4' }}>至少一个</td></tr>
+                            <tr><td style={tdStyle}><code>rssi_dBm</code></td><td style={tdStyle}>接收信号强度 (dBm)</td><td style={{ ...tdStyle, color: '#4ecdc4' }}>至少一个</td></tr>
+                            <tr><td style={tdStyle}><code>xpd_dB</code></td><td style={tdStyle}>交叉极化鉴别度 (dB)</td><td style={{ ...tdStyle, color: '#4ecdc4' }}>至少一个</td></tr>
+                            <tr><td style={tdStyle}><code>attenuation_dB</code></td><td style={tdStyle}>大气衰减 (dB)</td><td style={{ ...tdStyle, color: '#4ecdc4' }}>至少一个</td></tr>
                         </tbody>
                     </table>
                 </div>

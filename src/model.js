@@ -2,6 +2,14 @@ import * as satellite from 'satellite.js';
 import { computeStatisticalCir } from './channel/statisticalCir.js';
 import { calculateDopplerFromEciState } from './geometry/eciEcf.js';
 import { groundPositionEcf } from './geometry/linkGeometry.js';
+import {
+  calibrateModel as calibrateModelCore,
+} from './calibration/calibrationEngine.js';
+import { parseCalibrationDataset } from './calibration/measurementAdapter.js';
+import {
+  createDefaultCalibration as createDefaultCalibrationCore,
+  getCalibrationParameterDefs,
+} from './calibration/schema.js';
 
 // ITU-R P.838-3 Table 1: Specific rain attenuation coefficients (horizontal polarization).
 // Sorted by frequency (GHz). Used for log-linear interpolation per the standard.
@@ -617,30 +625,13 @@ export function fitModelToData(realData, currentParams) {
 /**
  * 校准参数配置 — 定义可校准参数及其约束
  */
-const CALIB_PARAM_DEFS = [
-  { key: 'correctionFactor', label: '雨衰修正系数', defaultVal: 1.0, min: 0.3, max: 3.0, step: 0.01 },
-  { key: 'gasAttenOffset_dB', label: '气体衰减偏移(dB)', defaultVal: 0.0, min: -2.0, max: 2.0, step: 0.01 },
-  { key: 'scatterPowerOffset_dB', label: '散射功率偏移(dB)', defaultVal: 0.0, min: -10, max: 5.0, step: 0.1 },
-  { key: 'eirpOffset_dB', label: 'EIRP偏移(dB)', defaultVal: 0.0, min: -5.0, max: 5.0, step: 0.1 },
-  { key: 'systemNoiseOffset_K', label: '噪温偏移(K)', defaultVal: 0.0, min: -50, max: 100, step: 1.0 }
-];
-
 /**
  * 创建默认校准配置（所有偏移为零）
  * @returns {object} CalibrationProfile
  */
 export function createDefaultCalibration() {
-  const profile = {
-    calibrated: false,
-    timestamp: null,
-    dataPointCount: 0,
-    residualRMS: 0,
-    params: {}
-  };
-  for (const def of CALIB_PARAM_DEFS) {
-    profile.params[def.key] = def.defaultVal;
-  }
-  return profile;
+  const profile = createDefaultCalibrationCore();
+  return { ...profile, timestamp: profile.createdAt, residualRMS: profile.residualRms };
 }
 
 /**
@@ -655,90 +646,12 @@ export function applyCalibration(rawParams, calibProfile) {
   const cp = calibProfile.params;
   return {
     ...rawParams,
-    correctionFactor: cp.correctionFactor || 1.0,
-    gasAttenOffset_dB: cp.gasAttenOffset_dB || 0,
-    scatterPowerOffset_dB: cp.scatterPowerOffset_dB || 0,
-    eirp: (rawParams.eirp || 60.0) + (cp.eirpOffset_dB || 0),
-    tRx: (rawParams.tRx || 150.0) + (cp.systemNoiseOffset_K || 0)
+    correctionFactor: cp.correctionFactor ?? 1.0,
+    gasAttenOffset_dB: cp.gasAttenOffset_dB ?? 0,
+    scatterPowerOffset_dB: cp.scatterPowerOffset_dB ?? 0,
+    eirp: (rawParams.eirp ?? rawParams.eirp_dBW) + (cp.eirpOffset_dB ?? 0),
+    tRx: (rawParams.tRx ?? rawParams.systemNoiseTemperature_K) + (cp.systemNoiseOffset_K ?? 0)
   };
-}
-
-/**
- * 根据链路参数仿真出与测量数据对比的预测值
- * @param {object} linkParams — 链路参数（含校准偏移）
- * @param {object} measurement — 单个测量数据点
- * @returns {object} — { predictedCN0, predictedRSSI, predictedXPD, predictedAtten }
- */
-function simulateForMeasurement(linkParams, measurement) {
-  const testParams = {
-    ...linkParams,
-    elevation: measurement.elevation || linkParams.elevation || 30,
-    rainRate: measurement.rainRate != null ? measurement.rainRate : (linkParams.rainRate || 0)
-  };
-  const lb = calculateLinkBudget(testParams);
-
-  const freq = linkParams.freq || 30;
-  const eirp = linkParams.eirp || 60.0;
-  const gRx = linkParams.gRx || 42.0;
-  const tRx = linkParams.tRx || 150.0;
-  const bwMHz = linkParams.bandwidth || 400.0;
-  const slantRange = linkParams.slantRange || 35786;
-
-  const absoluteFspl = 20 * Math.log10(slantRange) + 20 * Math.log10(freq) + 92.45;
-  const absoluteLoss = lb.totalAtmosphericLoss + lb.fadeLMS + lb.lossFaraday
-    + lb.pointingLoss + (lb.scanLoss || 0) + (lb.multipathLoss || 0) + absoluteFspl;
-  const rxPowerDbm = eirp + 30 - absoluteLoss + gRx;
-
-  const k_boltzmann = 1.380649e-23;
-  const tSys = tRx + lb.tSky + 3.0;
-  const noisePowerW = k_boltzmann * tSys * (bwMHz * 1e6);
-  const noiseFloorDbm = 10 * Math.log10(noisePowerW) + 30;
-  const cn0 = Math.max(-30, rxPowerDbm - noiseFloorDbm);
-
-  return {
-    predictedCN0: cn0,
-    predictedRSSI: rxPowerDbm,
-    predictedXPD: lb.xpd,
-    predictedAtten: lb.totalAtmosphericLoss,
-    totalLoss: lb.totalLoss
-  };
-}
-
-/**
- * 计算残差向量 — 仿真值与测量值的差
- * @param {Array} measurements — 测量数据数组
- * @param {object} linkParams — 当前链路参数
- * @param {object} calibParams — 当前校准参数值
- * @returns {Array<number>} — 残差数组
- */
-function computeResiduals(measurements, linkParams, calibParams) {
-  const testProfile = { calibrated: true, params: calibParams };
-  const calibratedParams = applyCalibration(linkParams, testProfile);
-  const residuals = [];
-
-  for (const m of measurements) {
-    const sim = simulateForMeasurement(calibratedParams, m);
-
-    // 根据可用的测量类型计算残差（加权）
-    if (m.measuredCN0_dB != null) {
-      residuals.push((sim.predictedCN0 - m.measuredCN0_dB) * 2.0);    // C/N0 权重最高
-    }
-    if (m.measuredRSSI_dBm != null) {
-      residuals.push((sim.predictedRSSI - m.measuredRSSI_dBm) * 1.5);  // RSSI 次之
-    }
-    if (m.measuredXPD_dB != null) {
-      residuals.push((sim.predictedXPD - m.measuredXPD_dB) * 1.0);
-    }
-    if (m.measuredAttenuation_dB != null) {
-      residuals.push((sim.predictedAtten - m.measuredAttenuation_dB) * 1.5);
-    }
-    // 向后兼容旧格式
-    if (m.measuredLoss != null && m.measuredCN0_dB == null) {
-      residuals.push((sim.totalLoss - m.measuredLoss) * 1.0);
-    }
-  }
-
-  return residuals;
 }
 
 /**
@@ -750,141 +663,27 @@ function computeResiduals(measurements, linkParams, calibParams) {
  * @returns {object} CalibrationProfile
  */
 export function calibrateModel(measurements, linkParams, refSatellite = null) {
-  if (!measurements || measurements.length === 0) {
-    return createDefaultCalibration();
-  }
-
-  // 合并已知卫星参数
-  const effectiveParams = refSatellite
-    ? { ...linkParams, freq: refSatellite.freq, eirp: refSatellite.eirp }
-    : { ...linkParams };
-
-  // 初始化校准参数
-  const calibParams = {};
-  for (const def of CALIB_PARAM_DEFS) {
-    calibParams[def.key] = def.defaultVal;
-  }
-
-  const maxIterations = 30;
-  const convergenceThreshold = 1e-6;
-  const dampingFactor = 0.01; // Levenberg-Marquardt 阻尼
-
-  for (let iter = 0; iter < maxIterations; iter++) {
-    const residuals = computeResiduals(measurements, effectiveParams, calibParams);
-    const currentCost = residuals.reduce((s, r) => s + r * r, 0);
-
-    // 数值雅可比矩阵 (J)
-    const nParams = CALIB_PARAM_DEFS.length;
-    const nResiduals = residuals.length;
-    const J = [];
-
-    for (let p = 0; p < nParams; p++) {
-      const def = CALIB_PARAM_DEFS[p];
-      const delta = Math.max(def.step * 0.1, 1e-6);
-      const savedVal = calibParams[def.key];
-
-      calibParams[def.key] = savedVal + delta;
-      const rPlus = computeResiduals(measurements, effectiveParams, calibParams);
-
-      calibParams[def.key] = savedVal;
-
-      const col = [];
-      for (let r = 0; r < nResiduals; r++) {
-        col.push((rPlus[r] - residuals[r]) / delta);
-      }
-      J.push(col);
-    }
-
-    // Gauss-Newton: (J^T * J + λI) * Δp = -J^T * r
-    // 构建 J^T * J  和  J^T * r
-    const JtJ = Array.from({ length: nParams }, () => new Float64Array(nParams));
-    const JtR = new Float64Array(nParams);
-
-    for (let i = 0; i < nParams; i++) {
-      for (let j = 0; j < nParams; j++) {
-        let sum = 0;
-        for (let r = 0; r < nResiduals; r++) {
-          sum += J[i][r] * J[j][r];
-        }
-        JtJ[i][j] = sum;
-      }
-      // J^T * r
-      let sumR = 0;
-      for (let r = 0; r < nResiduals; r++) {
-        sumR += J[i][r] * residuals[r];
-      }
-      JtR[i] = sumR;
-    }
-
-    // 加阻尼 (LM)
-    for (let i = 0; i < nParams; i++) {
-      JtJ[i][i] += dampingFactor * (JtJ[i][i] + 1e-8);
-    }
-
-    // 解 Δp — Gaussian elimination (小矩阵 5x5)
-    const A = JtJ.map(row => [...row]);
-    const b = [...JtR];
-
-    for (let col = 0; col < nParams; col++) {
-      // 部分主元
-      let maxRow = col;
-      for (let row = col + 1; row < nParams; row++) {
-        if (Math.abs(A[row][col]) > Math.abs(A[maxRow][col])) maxRow = row;
-      }
-      [A[col], A[maxRow]] = [A[maxRow], A[col]];
-      [b[col], b[maxRow]] = [b[maxRow], b[col]];
-
-      const pivot = A[col][col];
-      if (Math.abs(pivot) < 1e-12) continue;
-
-      for (let row = col + 1; row < nParams; row++) {
-        const factor = A[row][col] / pivot;
-        for (let j = col; j < nParams; j++) {
-          A[row][j] -= factor * A[col][j];
-        }
-        b[row] -= factor * b[col];
-      }
-    }
-
-    // 回代
-    const dp = new Float64Array(nParams);
-    for (let i = nParams - 1; i >= 0; i--) {
-      let sum = b[i];
-      for (let j = i + 1; j < nParams; j++) {
-        sum -= A[i][j] * dp[j];
-      }
-      dp[i] = Math.abs(A[i][i]) > 1e-12 ? sum / A[i][i] : 0;
-    }
-
-    // 更新参数（带边界约束）
-    let maxStep = 0;
-    for (let p = 0; p < nParams; p++) {
-      const def = CALIB_PARAM_DEFS[p];
-      const newVal = Math.max(def.min, Math.min(def.max, calibParams[def.key] - dp[p]));
-      maxStep = Math.max(maxStep, Math.abs(newVal - calibParams[def.key]));
-      calibParams[def.key] = newVal;
-    }
-
-    if (maxStep < convergenceThreshold) break;
-  }
-
-  // 最终残差统计
-  const finalResiduals = computeResiduals(measurements, effectiveParams, calibParams);
-  const rmsResidual = Math.sqrt(finalResiduals.reduce((s, r) => s + r * r, 0) / Math.max(1, finalResiduals.length));
-
+  const parsed = parseCalibrationDataset(measurements ?? []);
+  const profile = calibrateModelCore({
+    measurements: parsed.measurements,
+    linkParams,
+    referenceSatellite: refSatellite,
+  });
   return {
-    calibrated: true,
-    timestamp: new Date().toISOString(),
-    dataPointCount: measurements.length,
-    residualRMS: rmsResidual,
-    refSatellite: refSatellite ? refSatellite.satName : null,
-    params: { ...calibParams }
+    ...profile,
+    timestamp: profile.createdAt,
+    residualRMS: profile.residualRms,
+    refSatellite: refSatellite?.satName ?? null,
+    diagnostics: [...parsed.diagnostics, ...profile.diagnostics],
   };
 }
 
 /** 获取校准参数定义（供 UI 展示） */
 export function getCalibParamDefs() {
-  return CALIB_PARAM_DEFS;
+  return getCalibrationParameterDefs().map((definition) => ({
+    ...definition,
+    defaultVal: definition.defaultValue,
+  }));
 }
 
 // === 信道冲激响应 (CIR) — 抽头延迟线 (TDL) 模型 ===
@@ -1453,7 +1252,7 @@ export function calculateDopplerShift(tleLine1, tleLine2, gsLat, gsLon, gsAlt, d
       gmst_rad: gmst,
       frequency_Hz: freqGHz * 1e9,
     }).doppler_Hz;
-  } catch (e) {
+  } catch {
     return 0;
   }
 }
