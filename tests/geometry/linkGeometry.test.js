@@ -23,8 +23,8 @@ describe('shared link geometry', () => {
       time: { frameCount: 2 },
       transmitter: {
         track: [
-          { timestampUtc: '2026-08-05T00:00:00.000Z', projectedPosition_m: { x: 0, y: 0, z: 1_000 } },
-          { timestampUtc: '2026-08-05T00:00:01.000Z', projectedPosition_m: { x: 1_000, y: 0, z: 1_000 } },
+          { frameId: 0, timestampUtc: '2026-08-05T00:00:00.000Z', projectedPosition_m: { x: 0, y: 0, z: 1_000 } },
+          { frameId: 1, timestampUtc: '2026-08-05T00:00:01.000Z', projectedPosition_m: { x: 1_000, y: 0, z: 1_000 } },
         ],
       },
       receiver: {

@@ -62,4 +62,53 @@ describe('scenario frame geometry', () => {
       expect.objectContaining({ code: 'RECEIVER_TRACK_FRAME_MISSING' }),
     );
   });
+
+  it.each([
+    ['missing', undefined],
+    ['misaligned', {
+      frameId: 7,
+      timestampUtc: '2026-08-05T00:00:01.000Z',
+      projectedPosition_m: { x: 1_010, y: 0, z: 1_000 },
+    }],
+  ])('rejects a %s transmitter point for the requested frame', (_label, transmitterPoint) => {
+    const scenario = scenarioFixtureWithTracks();
+    scenario.transmitter.track[1] = transmitterPoint;
+
+    expect(() => scenarioFrameGeometry(scenario, 1)).toThrowError(
+      expect.objectContaining({ code: 'TRANSMITTER_TRACK_FRAME_MISSING' }),
+    );
+  });
+
+  it.each([
+    ['transmitter', 'TRANSMITTER_TRACK_POSITION_INVALID', (scenario) => {
+      scenario.transmitter.track[1].projectedPosition_m.x = Number.NaN;
+    }],
+    ['receiver', 'RECEIVER_TRACK_POSITION_INVALID', (scenario) => {
+      scenario.receiver.track[1].projectedPosition_m.z = undefined;
+    }],
+  ])('rejects non-finite %s projected coordinates', (_label, code, corrupt) => {
+    const scenario = scenarioFixtureWithTracks();
+    corrupt(scenario);
+
+    expect(() => scenarioFrameGeometry(scenario, 1)).toThrowError(
+      expect.objectContaining({ code }),
+    );
+  });
+
+  it('returns position snapshots that cannot mutate the scenario tracks', () => {
+    const scenario = scenarioFixtureWithTracks();
+    const geometry = scenarioFrameGeometry(scenario, 1);
+
+    expect(geometry.transmitterPosition_m).not.toBe(
+      scenario.transmitter.track[1].projectedPosition_m,
+    );
+    expect(geometry.receiverPosition_m).not.toBe(
+      scenario.receiver.track[1].projectedPosition_m,
+    );
+    geometry.transmitterPosition_m.x = -1;
+    geometry.receiverPosition_m.x = -2;
+
+    expect(scenario.transmitter.track[1].projectedPosition_m.x).toBe(1_010);
+    expect(scenario.receiver.track[1].projectedPosition_m.x).toBe(10);
+  });
 });

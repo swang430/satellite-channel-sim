@@ -68,6 +68,21 @@ function scenarioFixture() {
   return scenario;
 }
 
+const invalidComparisonParameterCases = [
+  ['zero realization count', { realizationCount: 0 }],
+  ['negative realization count', { realizationCount: -1 }],
+  ['NaN realization count', { realizationCount: Number.NaN }],
+  ['fractional realization count', { realizationCount: 1.5 }],
+  ['string realization count', { realizationCount: '2' }],
+  ['unknown environment', { statisticalParameters: { environment: 'forest' } }],
+  ['numeric environment', { statisticalParameters: { environment: 2 } }],
+  ['null environment', { statisticalParameters: { environment: null } }],
+  ['negative TEC', { statisticalParameters: { tec_TECU: -1 } }],
+  ['NaN TEC', { statisticalParameters: { tec_TECU: Number.NaN } }],
+  ['NaN scatter offset', { statisticalParameters: { scatterPowerOffset_dB: Number.NaN } }],
+  ['string scatter offset', { statisticalParameters: { scatterPowerOffset_dB: '-2' } }],
+];
+
 describe('scenario comparison report', () => {
   it('compares every MPDB frame using native receiver geometry', async () => {
     const progress = [];
@@ -133,6 +148,36 @@ describe('scenario comparison report', () => {
     });
   });
 
+  it.each(invalidComparisonParameterCases)(
+    'rejects %s before comparing any frame',
+    async (_label, options) => {
+      const progress = [];
+
+      await expect(compareScenario(scenarioFixture(), {
+        ...options,
+        onProgress: (value) => progress.push(value),
+      })).rejects.toMatchObject({ code: 'STATISTICAL_CIR_INPUT_INVALID' });
+      expect(progress).toEqual([]);
+    },
+  );
+
+  it('lets a host timer cancel comparison before all frames finish', async () => {
+    const controller = new AbortController();
+    const progress = [];
+    const timer = setTimeout(() => controller.abort(), 0);
+
+    try {
+      await expect(compareScenario(scenarioFixture(), {
+        realizationCount: 1,
+        signal: controller.signal,
+        onProgress: (value) => progress.push(value),
+      })).rejects.toMatchObject({ code: 'COMPARISON_CANCELLED' });
+      expect(progress.at(-1)).toBeLessThan(1);
+    } finally {
+      clearTimeout(timer);
+    }
+  });
+
   it('applies scatter power offset to the statistical PDP instead of report metadata only', async () => {
     const baseline = await compareScenario(scenarioFixture(), {
       realizationCount: 2,
@@ -158,6 +203,28 @@ describe('scenario comparison report', () => {
     ];
 
     expect(reducedNearScatter / baselineNearScatter).toBeCloseTo(10 ** (-6 / 10), 10);
+  });
+
+  it('snapshots frame positions so report edits cannot mutate the scenario', async () => {
+    const scenario = scenarioFixture();
+    const report = await compareScenario(scenario, { realizationCount: 1 });
+    const frame = report.frames[0];
+
+    expect(frame.receiver.projectedPosition_m).not.toBe(
+      scenario.receiver.track[0].projectedPosition_m,
+    );
+    expect(frame.geometry.transmitterPosition_m).not.toBe(
+      scenario.transmitter.track[0].projectedPosition_m,
+    );
+    expect(frame.geometry.receiverPosition_m).not.toBe(
+      scenario.receiver.track[0].projectedPosition_m,
+    );
+    frame.receiver.projectedPosition_m.x = 101;
+    frame.geometry.transmitterPosition_m.x = 102;
+    frame.geometry.receiverPosition_m.x = 103;
+
+    expect(scenario.receiver.track[0].projectedPosition_m.x).toBe(0);
+    expect(scenario.transmitter.track[0].projectedPosition_m.x).toBe(0);
   });
 
   it('lets Oracle consume relative comparison reports without fabricating RT SNR', () => {

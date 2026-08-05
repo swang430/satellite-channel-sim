@@ -3,7 +3,10 @@ import { DomainValidationError } from '../domain/validation.js';
 import { scenarioFrameGeometry } from '../geometry/scenarioGeometry.js';
 import { comparePdpMetrics, summarizeRtPathStatistics } from './comparisonMetrics.js';
 import { rtFrameToPdp } from './rtChannelAdapter.js';
-import { runStatisticalEnsemble } from './statisticalEnsemble.js';
+import {
+  normalizeStatisticalEnsembleParameters,
+  runStatisticalEnsemble,
+} from './statisticalEnsemble.js';
 
 export const COMPARISON_MODEL_VERSION = 'mpdb-statistical-comparison/v2';
 
@@ -18,6 +21,21 @@ function ensembleMedianPdp(ensemble) {
   };
 }
 
+function throwIfComparisonAborted(signal) {
+  if (signal?.aborted) {
+    throw new DomainValidationError('COMPARISON_CANCELLED', 'Comparison was cancelled');
+  }
+}
+
+async function yieldToHost() {
+  const schedulerYield = globalThis.scheduler?.yield;
+  if (typeof schedulerYield === 'function') {
+    await schedulerYield.call(globalThis.scheduler);
+    return;
+  }
+  await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+}
+
 export async function compareScenario(scenario, {
   realizationCount = 32,
   statisticalParameters = {},
@@ -25,16 +43,20 @@ export async function compareScenario(scenario, {
   onProgress,
 } = {}) {
   assertScenarioReadyForComparison(scenario);
+  const normalizedEnsembleParameters = normalizeStatisticalEnsembleParameters({
+    realizationCount,
+    environment: statisticalParameters?.environment,
+    tec_TECU: statisticalParameters?.tec_TECU,
+    scatterPowerOffset_dB: statisticalParameters?.scatterPowerOffset_dB,
+  });
   const normalizedStatisticalParameters = {
-    environment: statisticalParameters?.environment ?? 'suburban',
-    tec_TECU: statisticalParameters?.tec_TECU ?? 50,
-    scatterPowerOffset_dB: statisticalParameters?.scatterPowerOffset_dB ?? 0,
+    environment: normalizedEnsembleParameters.environment,
+    tec_TECU: normalizedEnsembleParameters.tec_TECU,
+    scatterPowerOffset_dB: normalizedEnsembleParameters.scatterPowerOffset_dB,
   };
   const frames = [];
   for (let frameId = 0; frameId < scenario.time.frameCount; frameId += 1) {
-    if (signal?.aborted) {
-      throw new DomainValidationError('COMPARISON_CANCELLED', 'Comparison was cancelled');
-    }
+    throwIfComparisonAborted(signal);
     const geometry = scenarioFrameGeometry(scenario, frameId);
     const receiverPoint = scenario.receiver.track[frameId];
     const rt = rtFrameToPdp(scenario, frameId);
@@ -44,13 +66,14 @@ export async function compareScenario(scenario, {
       geometry,
       carrier: scenario.carrier,
       ...normalizedStatisticalParameters,
-      realizationCount,
+      realizationCount: normalizedEnsembleParameters.realizationCount,
     });
     frames.push({
       frameId,
       timestampUtc: geometry.timestampUtc,
       receiver: {
         ...receiverPoint,
+        projectedPosition_m: { ...receiverPoint.projectedPosition_m },
         source: 'rayTracing.rxPosition',
       },
       geometry,
@@ -64,13 +87,14 @@ export async function compareScenario(scenario, {
       metrics: comparePdpMetrics(rt.pdp, ensembleMedianPdp(statistical)),
     });
     onProgress?.((frameId + 1) / scenario.time.frameCount);
-    await Promise.resolve();
+    await yieldToHost();
+    throwIfComparisonAborted(signal);
   }
   return {
     scenarioId: scenario.scenarioId,
     comparisonRevision: scenario.comparisonRevision,
     modelVersion: COMPARISON_MODEL_VERSION,
-    realizationCount,
+    realizationCount: normalizedEnsembleParameters.realizationCount,
     seedScheme: 'scenario/frame/realization',
     provenance: scenario.source,
     receiverGeometry: {

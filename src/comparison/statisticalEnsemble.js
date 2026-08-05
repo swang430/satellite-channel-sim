@@ -2,6 +2,46 @@ import { computeStatisticalCir } from '../channel/statisticalCir.js';
 import { DomainValidationError } from '../domain/validation.js';
 import { createDeterministicRng, seedForRealization } from './deterministicRng.js';
 
+const SUPPORTED_ENVIRONMENTS = new Set(['rural', 'suburban', 'urban', 'maritime']);
+
+function invalidStatisticalParameter(message) {
+  throw new DomainValidationError('STATISTICAL_CIR_INPUT_INVALID', message);
+}
+
+export function normalizeStatisticalEnsembleParameters(parameters = {}) {
+  const normalized = {
+    realizationCount: parameters.realizationCount === undefined
+      ? 32 : parameters.realizationCount,
+    environment: parameters.environment === undefined
+      ? 'suburban' : parameters.environment,
+    tec_TECU: parameters.tec_TECU === undefined ? 50 : parameters.tec_TECU,
+    scatterPowerOffset_dB: parameters.scatterPowerOffset_dB === undefined
+      ? 0 : parameters.scatterPowerOffset_dB,
+  };
+  if (typeof normalized.realizationCount !== 'number'
+    || !Number.isFinite(normalized.realizationCount)
+    || !Number.isInteger(normalized.realizationCount)
+    || normalized.realizationCount <= 0) {
+    invalidStatisticalParameter('realizationCount must be a finite positive integer');
+  }
+  if (typeof normalized.environment !== 'string'
+    || !SUPPORTED_ENVIRONMENTS.has(normalized.environment)) {
+    invalidStatisticalParameter(
+      'environment must be one of rural, suburban, urban, or maritime',
+    );
+  }
+  if (typeof normalized.tec_TECU !== 'number'
+    || !Number.isFinite(normalized.tec_TECU)
+    || normalized.tec_TECU < 0) {
+    invalidStatisticalParameter('tec_TECU must be a finite non-negative number');
+  }
+  if (typeof normalized.scatterPowerOffset_dB !== 'number'
+    || !Number.isFinite(normalized.scatterPowerOffset_dB)) {
+    invalidStatisticalParameter('scatterPowerOffset_dB must be a finite number');
+  }
+  return normalized;
+}
+
 function quantile(sorted, probability) {
   if (sorted.length === 1) return sorted[0];
   const position = (sorted.length - 1) * probability;
@@ -16,20 +56,22 @@ export function runStatisticalEnsemble({
   frameId,
   geometry,
   carrier,
-  environment = 'suburban',
-  tec_TECU = 50,
-  scatterPowerOffset_dB = 0,
-  realizationCount = 32,
+  environment,
+  tec_TECU,
+  scatterPowerOffset_dB,
+  realizationCount,
 }) {
-  if (!Number.isFinite(scatterPowerOffset_dB)) {
-    throw new DomainValidationError(
-      'STATISTICAL_CIR_INPUT_INVALID',
-      'scatterPowerOffset_dB must be finite',
-    );
-  }
+  const normalized = normalizeStatisticalEnsembleParameters({
+    environment,
+    tec_TECU,
+    scatterPowerOffset_dB,
+    realizationCount,
+  });
   const realizations = [];
   const binIndices = new Set();
-  for (let realizationId = 0; realizationId < realizationCount; realizationId += 1) {
+  for (let realizationId = 0;
+    realizationId < normalized.realizationCount;
+    realizationId += 1) {
     const seed = seedForRealization(scenarioId, frameId, realizationId);
     const rng = createDeterministicRng(seed);
     const cir = computeStatisticalCir({
@@ -37,9 +79,9 @@ export function runStatisticalEnsemble({
       bandwidth_Hz: carrier.bandwidth_Hz,
       slantRange_m: geometry.slantRange_m,
       elevation_deg: geometry.elevation_deg,
-      environment,
-      tec_TECU,
-      scatterPowerOffset_dB,
+      environment: normalized.environment,
+      tec_TECU: normalized.tec_TECU,
+      scatterPowerOffset_dB: normalized.scatterPowerOffset_dB,
       simTime_s: rng() * 10_000,
     });
     const powers = new Map();
@@ -55,7 +97,7 @@ export function runStatisticalEnsemble({
     .map((realization) => realization.powers.get(binIndex) ?? 0)
     .sort((left, right) => left - right));
   return {
-    realizationCount,
+    realizationCount: normalized.realizationCount,
     seedScheme: 'fnv1a32(scenarioId,frameId,realizationId)+mulberry32',
     binWidth_s: 1 / carrier.bandwidth_Hz,
     binIndices: orderedBinIndices,
