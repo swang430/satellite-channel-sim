@@ -156,6 +156,31 @@ describe('comparison PDP view model', () => {
   });
 
   it.each([
+    ['non-zero coordinates', 1, 1.1],
+    ['large projected coordinates', 1_000_000, 1_000_000.1],
+  ])('keeps the shared 0.1 metre stationary semantics at %s', (_label, startX_m, endX_m) => {
+    const report = comparisonReportFixture();
+    report.frames[0].receiver.projectedPosition_m.x = startX_m;
+    report.frames[1].receiver.projectedPosition_m.x = endX_m;
+
+    expect(buildComparisonPlaybackSummary(report, 1)).toMatchObject({
+      receiverMotion: 'stationary',
+      receiverDisplacement_m: expect.closeTo(0.1),
+    });
+  });
+
+  it('does not hide receiver movement just above the stationary threshold', () => {
+    const report = comparisonReportFixture();
+    report.frames[0].receiver.projectedPosition_m.x = 1_000_000;
+    report.frames[1].receiver.projectedPosition_m.x = 1_000_000.1001;
+
+    expect(buildComparisonPlaybackSummary(report, 1)).toMatchObject({
+      receiverMotion: 'moving',
+      receiverDisplacement_m: expect.closeTo(0.1001),
+    });
+  });
+
+  it.each([
     ['empty report', () => nextComparisonPosition({ frames: [] }, 0)],
     ['negative position', () => nextComparisonPosition(comparisonReportFixture(), -1)],
     ['fractional position', () => nextComparisonPosition(comparisonReportFixture(), 0.5)],

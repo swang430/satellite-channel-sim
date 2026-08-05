@@ -1,7 +1,7 @@
 import { DomainValidationError } from '../../domain/validation.js';
+import { receiverMotionAt } from '../mpdb-import/receiverTrack.js';
 
 const PLOT_FLOOR_DB = -120;
-const DEFAULT_STATIONARY_THRESHOLD_M = 0.1;
 const UNDEFINED_H_NORMALIZATION = 'UNDEFINED_H_NORMALIZATION';
 
 function invalidComparisonData(message) {
@@ -110,16 +110,10 @@ function receiverMotion(report, position) {
   if (position === 0) return { state: 'initial', displacement_m: 0 };
   const previous = projectedPosition(report.frames[position - 1], 'previous receiver position');
   const current = projectedPosition(report.frames[position], 'receiver position');
-  const displacement_m = Math.hypot(
-    current.x - previous.x,
-    current.y - previous.y,
-    current.z - previous.z,
-  );
-  requireFinite(displacement_m, 'receiver displacement');
-  return {
-    state: displacement_m <= DEFAULT_STATIONARY_THRESHOLD_M ? 'stationary' : 'moving',
-    displacement_m,
-  };
+  return receiverMotionAt([
+    { frameId: 0, projectedPosition_m: previous },
+    { frameId: 1, projectedPosition_m: current },
+  ], 1);
 }
 
 export function buildComparisonPlotData(frame) {
