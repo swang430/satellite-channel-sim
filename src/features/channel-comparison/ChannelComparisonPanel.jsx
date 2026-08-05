@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { compareScenario } from '../../comparison/compareScenario.js';
 import { validateScenario } from '../../domain/scenario.js';
 import { COMPARISON_REALIZATION_COUNT } from './comparisonReportState.js';
@@ -25,6 +25,8 @@ export default function ChannelComparisonPanel({
   statisticalParameters,
   parameterError,
   onReportChange,
+  autoRun = false,
+  preservePreviousReport = false,
 }) {
   const [summaryReport, setSummaryReport] = useState(null);
   const [running, setRunning] = useState(false);
@@ -54,10 +56,10 @@ export default function ChannelComparisonPanel({
     abortRef.current = null;
     setRunning(false);
     setSummaryReport(null);
-    onReportChangeRef.current?.(null);
+    if (!preservePreviousReport) onReportChangeRef.current?.(null);
   }
 
-  async function runComparison() {
+  const runComparison = useCallback(async () => {
     abortRef.current?.abort();
     const controller = new AbortController();
     const runVersion = runVersionRef.current + 1;
@@ -67,7 +69,7 @@ export default function ChannelComparisonPanel({
     setProgress(0);
     setError('');
     setSummaryReport(null);
-    onReportChangeRef.current?.(null);
+    if (!preservePreviousReport) onReportChangeRef.current?.(null);
 
     try {
       const engineReport = await compareScenario(scenario, {
@@ -87,7 +89,7 @@ export default function ChannelComparisonPanel({
     } catch (caught) {
       if (runVersionRef.current !== runVersion) return;
       setSummaryReport(null);
-      onReportChangeRef.current?.(null);
+      if (!preservePreviousReport) onReportChangeRef.current?.(null);
       if (caught?.code !== 'COMPARISON_CANCELLED') {
         setError(caught instanceof Error ? caught.message : String(caught));
       }
@@ -97,7 +99,12 @@ export default function ChannelComparisonPanel({
         abortRef.current = null;
       }
     }
-  }
+  }, [preservePreviousReport, requestKey, scenario, statisticalParameters]);
+
+  useEffect(() => {
+    if (!autoRun || !scenarioCanRun(scenario, requestKey, parameterError)) return;
+    runComparison();
+  }, [autoRun, parameterError, requestKey, runComparison, scenario]);
 
   if (!scenario) return null;
   const enabled = scenarioCanRun(scenario, requestKey, parameterError);
@@ -128,7 +135,7 @@ export default function ChannelComparisonPanel({
         </span>
       </div>
       <div style={{ marginTop: '7px', color: '#d6aa6c', fontSize: '0.76em' }}>
-        相对 PDP 对比；RT 绝对功率不可用（UNDEFINED_H_NORMALIZATION）。
+        统计 PDP 会随场景参数自动刷新；RT 绝对功率不可用（UNDEFINED_H_NORMALIZATION）。
       </div>
       {(parameterError || error) && (
         <div role="alert" style={{ color: '#ff9e9e', marginTop: '8px' }}>

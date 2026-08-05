@@ -475,7 +475,8 @@ export default function UserManual({ onClose }) {
                         <li>全程跟随 MPDB 原生接收机轨迹：同一 frame 使用同帧 TX、RX、RT 射线和统计几何；移动段按移动位置、静止段按静止位置播放。</li>
                         <li>系统按配置内容与实体身份、scenarioId、frameId 和 frameOffsets 关联；配置身份错配会被拒绝，文件名不参与关联。</li>
                         <li>需要固定点比较时，请在 Lauraycs 中生成固定终端 MPDB 后导入；UI 不会冻结某一 frame 代替整段 RX 轨迹。</li>
-                        <li>统计模型固定运行 32 次确定性 realization，输出中位数、P5 和 P95。环境、TEC 或已启用校准的散射功率偏移变化后，旧报告失效，需重新计算。</li>
+                        <li>统计模型固定运行 32 次确定性 realization，输出中位数、P5 和 P95；导入 MPDB 或修改环境、TEC、已启用校准的散射功率偏移后会自动刷新。</li>
+                        <li>自动刷新期间继续显示上一版统计 PDP 基础层，但临时禁用 RT 叠加和三项拟合指标；当前参数计算完成后自动恢复。</li>
                         <li>PDP 以最早路径为零点，10 ns 分箱，同一 bin 内复振幅相干聚合。</li>
                         <li>主 CIR 播放器的 RT 叠加默认开启：统计 median 为青色、P5/P95 为边界、RT PDP 为红色；同时显示真实 frameId、UTC、RX 坐标、运动状态、仰角、斜距和三项拟合指标。</li>
                     </ol>

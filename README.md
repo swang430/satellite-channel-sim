@@ -58,7 +58,7 @@ HOST=0.0.0.0 npm run api
 - JSON 内容中的配置角色、实体身份和仿真时间窗；
 - MPDB `frameId`、列式 `frameOffsets` 以及逐帧索引。
 
-配置身份或仿真时间窗错配会被拒绝。统计模型对每个 MPDB frame 默认运行固定 32 个确定性 seed 的 realization，报告中位数、P5 和 P95。环境、TEC 或已启用校准 profile 中的 `scatterPowerOffset_dB` 发生变化时，旧报告立即失效，必须重新计算。
+配置身份或仿真时间窗错配会被拒绝。统计模型对每个 MPDB frame 默认运行固定 32 个确定性 seed 的 realization，报告中位数、P5 和 P95。导入 MPDB 后会自动生成统计基线；环境、TEC 或已启用校准 profile 中的 `scatterPowerOffset_dB` 发生变化时，统计基线会自动刷新。刷新期间保留上一版统计 PDP 作为可见基础层，但禁用 RT 叠加和拟合指标，直到当前参数的报告完成。
 
 主 CIR 播放器逐帧显示真实 frameId、UTC、接收机经纬高、移动/静止状态、帧间位移、仰角、斜距，以及 Jensen–Shannon divergence、加权时延距离和 RMS 时延扩展差。统计中位数为青色，P5/P95 为区间边界；红色 RT PDP 叠加开关默认开启，可关闭以单独查看统计结果。
 

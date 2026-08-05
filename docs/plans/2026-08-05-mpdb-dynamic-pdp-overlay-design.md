@@ -57,7 +57,7 @@ receiverGeometry: {
 }
 ```
 
-统计模型使用当前 UI 的 environment、TEC 和已启用校准中的 scatter power offset。报告保存这些参数及稳定 request key；任一参数变化都会使旧报告失效，防止把不同理论条件下的结果继续叠加到 RT。
+统计模型使用当前 UI 的 environment、TEC 和已启用校准中的 scatter power offset。报告保存这些参数及稳定 request key；任一参数变化都会使旧 RT 与拟合结果失效并触发自动重算，防止把不同理论条件下的结果继续叠加到 RT。重算期间保留上一版统计 PDP 作为可见基础层，并明确标记刷新状态。
 
 ## 4. 接收端运动状态
 
@@ -115,6 +115,7 @@ unavailable / UNDEFINED_H_NORMALIZATION
 继续负责：
 
 - 运行、取消 32-realization 比较；
+- 在 MPDB 导入或统计 request key 变化后自动运行比较；
 - 展示计算进度和报告摘要；
 - 通过 `onReportChange(report)` 向父级提交成功报告；
 - 在计算失败或场景替换时清除旧结果。
@@ -123,9 +124,9 @@ unavailable / UNDEFINED_H_NORMALIZATION
 
 ### 6.3 `ChannelSimPanel`
 
-持有 comparison report。父级只接受 scenarioId 和统计 request key 都匹配当前输入的报告；重新导入场景或修改 environment、TEC、校准散射偏移会停止播放、清除旧 report 并归零索引。
+持有 comparison report。父级只将 scenarioId 和统计 request key 都匹配当前输入的报告视为当前有效结果。重新导入不同场景会清除旧 report；修改 environment、TEC 或校准散射偏移会停止播放并归零索引，但在自动重算完成前保留同场景旧 report 的统计 PDP 作为预览，不展示其 RT 与拟合指标。
 
-存在有效 report 时，主 CIR 区域进入 MPDB 对齐比较模式；否则保持原自由运行统计 CIR 播放器。即使没有自由运行 timeline，只要 comparison report 已生成，也必须显示比较播放器。
+存在当前有效 report 时，主 CIR 区域进入 MPDB 对齐比较模式；参数变化触发新 report 计算时，继续用上一版 report 显示统计 PDP 基础层，但关闭 RT 与拟合指标。没有任何 MPDB report 时保持原自由运行统计 CIR 播放器。
 
 ### 6.4 `PdpComparisonPlayer`
 
@@ -186,7 +187,7 @@ unavailable / UNDEFINED_H_NORMALIZATION
 
 ## 9. 性能
 
-- 比较由用户显式启动，不在导入后自动运行。
+- MPDB 导入和统计 request key 变化会自动启动比较；用户仍可手动重跑或取消。
 - 保留逐帧进度和取消信号。
 - 播放只切换预计算 report，不在 tick 中重跑模型或解析射线。
 - 图表关闭动画。

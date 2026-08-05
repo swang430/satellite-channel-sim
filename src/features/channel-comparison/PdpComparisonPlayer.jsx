@@ -61,7 +61,11 @@ function fixed(value, digits) {
   return value.toFixed(digits);
 }
 
-export default function PdpComparisonPlayer({ report }) {
+export default function PdpComparisonPlayer({
+  report,
+  rtAvailable = true,
+  isRefreshing = false,
+}) {
   const [position, setPosition] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [fps, setFps] = useState(2);
@@ -84,7 +88,9 @@ export default function PdpComparisonPlayer({ report }) {
         : report;
       return {
         ok: true,
-        frames: buildComparisonPlaybackFrames(playbackReport, { showRtOverlay }),
+        frames: buildComparisonPlaybackFrames(playbackReport, {
+          showRtOverlay: rtAvailable && showRtOverlay,
+        }),
       };
     } catch (error) {
       if (error?.code !== 'COMPARISON_PLOT_DATA_INVALID') throw error;
@@ -94,7 +100,7 @@ export default function PdpComparisonPlayer({ report }) {
         code: error.code,
       };
     }
-  }, [report, reportFrames, showRtOverlay]);
+  }, [report, reportFrames, rtAvailable, showRtOverlay]);
 
   const frameCount = precomputedPlayback.ok ? precomputedPlayback.frames.length : 0;
   const activePosition = frameCount > 0
@@ -147,7 +153,8 @@ export default function PdpComparisonPlayer({ report }) {
           <input
             type="checkbox"
             aria-label="RT 叠加"
-            checked={showRtOverlay}
+            checked={rtAvailable && showRtOverlay}
+            disabled={!rtAvailable}
             onChange={(event) => setShowRtOverlay(event.target.checked)}
           />
           RT 叠加
@@ -218,25 +225,35 @@ export default function PdpComparisonPlayer({ report }) {
         </span>
         <span style={metricStyle}>仰角 {fixed(summary.elevation_deg, 3)}°</span>
         <span style={metricStyle}>斜距 {fixed(summary.slantRange_m / 1e3, 3)} km</span>
-        <span style={metricStyle}>JS divergence {fixed(summary.jsDivergence_bits, 5)} bit</span>
-        <span style={metricStyle}>
-          RMS 时延扩展差 {fixed(summary.rmsDelaySpreadDifference_s * 1e9, 3)} ns
-        </span>
-        <span style={metricStyle}>
-          加权时延距离 {fixed(summary.weightedDelayDistance_s * 1e9, 3)} ns
-        </span>
+        {rtAvailable && (
+          <>
+            <span style={metricStyle}>JS divergence {fixed(summary.jsDivergence_bits, 5)} bit</span>
+            <span style={metricStyle}>
+              RMS 时延扩展差 {fixed(summary.rmsDelaySpreadDifference_s * 1e9, 3)} ns
+            </span>
+            <span style={metricStyle}>
+              加权时延距离 {fixed(summary.weightedDelayDistance_s * 1e9, 3)} ns
+            </span>
+          </>
+        )}
       </div>
 
-      <div role="note" style={{ color: '#ffc890', fontSize: '0.76em', marginBottom: '8px' }}>
-        {summary.rtNormalizationStatus}：RT 绝对 H / 功率归一化定义缺失；图中 RT 与统计 PDP 各自按峰值归一化，仅比较动态形状与时延结构。
-      </div>
+      {rtAvailable ? (
+        <div role="note" style={{ color: '#ffc890', fontSize: '0.76em', marginBottom: '8px' }}>
+          {summary.rtNormalizationStatus}：RT 绝对 H / 功率归一化定义缺失；图中 RT 与统计 PDP 各自按峰值归一化，仅比较动态形状与时延结构。
+        </div>
+      ) : isRefreshing ? (
+        <div role="status" style={{ color: '#67e6ad', fontSize: '0.76em', marginBottom: '8px' }}>
+          统计 PDP 正在根据新的场景参数自动刷新；完成前暂时隐藏 RT 与拟合指标。
+        </div>
+      ) : null}
 
       <div style={{ height: '330px' }}>
         <Line
           data={chartData}
           options={CHART_OPTIONS}
           role="img"
-          aria-label={`PDP 图表：统计中位数、P5、P95；RT PDP ${showRtOverlay ? '已显示' : '已隐藏'}`}
+          aria-label={`PDP 图表：统计中位数、P5、P95；RT PDP ${rtAvailable && showRtOverlay ? '已显示' : '已隐藏'}`}
         />
       </div>
     </section>

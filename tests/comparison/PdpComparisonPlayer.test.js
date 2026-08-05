@@ -148,8 +148,8 @@ describe('PdpComparisonPlayer', () => {
     vi.restoreAllMocks();
   });
 
-  function render(report) {
-    act(() => root.render(createElement(PdpComparisonPlayer, { report })));
+  function render(report, props = {}) {
+    act(() => root.render(createElement(PdpComparisonPlayer, { report, ...props })));
   }
 
   it('shows RT by default and keeps all statistical datasets when RT is disabled', () => {
@@ -176,6 +176,26 @@ describe('PdpComparisonPlayer', () => {
     ]);
     expect(container.querySelector('[role="img"]').getAttribute('aria-label'))
       .toContain('RT PDP 已隐藏');
+  });
+
+  it('keeps the statistical PDP visible while a scene-parameter refresh disables RT', () => {
+    render(comparisonReportFixture(), {
+      rtAvailable: false,
+      isRefreshing: true,
+    });
+
+    const overlay = container.querySelector('input[aria-label="RT 叠加"]');
+    expect(overlay.disabled).toBe(true);
+    expect(overlay.checked).toBe(false);
+    expect(chartSources(container)).toEqual([
+      'statistical-median',
+      'statistical-p5',
+      'statistical-p95',
+    ]);
+    expect(container.textContent).toContain('统计 PDP 正在根据新的场景参数自动刷新');
+    expect(container.textContent).not.toContain('JS divergence');
+    expect(container.textContent).not.toContain('RMS 时延扩展差');
+    expect(container.textContent).not.toContain('UNDEFINED_H_NORMALIZATION');
   });
 
   it('advances non-contiguous frame IDs at the default FPS and stays still while paused', () => {

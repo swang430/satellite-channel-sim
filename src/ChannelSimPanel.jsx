@@ -1,5 +1,5 @@
 import {
-    lazy, Suspense, useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo,
+    lazy, Suspense, useState, useRef, useEffect, useCallback, useMemo,
 } from 'react';
 import { Line, Bar } from 'react-chartjs-2';
 import { generateChannelTimeSeries, predictPasses, calibrateModel, applyCalibration, createDefaultCalibration, getCalibParamDefs } from './model.js';
@@ -102,18 +102,20 @@ export default function ChannelSimPanel({
     }), [calibProfile, env, mpdbScenario?.scenarioId, tec, useCalibration]);
     const statisticalParameters = comparisonRequest.statisticalParameters;
     const comparisonRequestKey = comparisonRequest.requestKey;
-    const previousComparisonRequestKeyRef = useRef(comparisonRequestKey);
-    useLayoutEffect(() => {
-        if (previousComparisonRequestKeyRef.current === comparisonRequestKey) return;
-        previousComparisonRequestKeyRef.current = comparisonRequestKey;
-        // Request identity changes permanently invalidate the computed report before paint.
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setComparisonReport(null);
-    }, [comparisonRequestKey]);
     const activeComparisonReport = currentComparisonReport(
         comparisonReport,
         mpdbScenario?.scenarioId,
         comparisonRequestKey,
+    );
+    const comparisonPreviewReport = comparisonReport?.scenarioId === mpdbScenario?.scenarioId
+        ? comparisonReport
+        : null;
+    const displayedComparisonReport = activeComparisonReport ?? comparisonPreviewReport;
+    const isComparisonRefreshing = Boolean(
+        comparisonPreviewReport
+        && !activeComparisonReport
+        && comparisonRequestKey
+        && !comparisonRequest.error,
     );
     
     const [generatedTrajectorySamples, setGeneratedTrajectorySamples] = useState([]);
@@ -287,14 +289,14 @@ export default function ChannelSimPanel({
 
     // === CIR playback ===
     useEffect(() => {
-        if (!activeComparisonReport) return;
-        // A cached report can become active after request parameters return to an older key.
+        if (!displayedComparisonReport) return;
+        // Both a current comparison and its statistical-only refresh preview own the main PDP.
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setIsCirPlaying(false);
-    }, [activeComparisonReport]);
+    }, [displayedComparisonReport]);
 
     useEffect(() => {
-        if (activeComparisonReport || !isCirPlaying || timeline.length === 0) return;
+        if (displayedComparisonReport || !isCirPlaying || timeline.length === 0) return;
         const intervalMs = Math.max(20, Math.round(1000 / Math.max(1, cirFps)));
         const timer = setInterval(() => {
             setCirIdx(prev => {
@@ -304,7 +306,7 @@ export default function ChannelSimPanel({
             });
         }, intervalMs);
         return () => clearInterval(timer);
-    }, [activeComparisonReport, isCirPlaying, cirFps, timeline.length]);
+    }, [displayedComparisonReport, isCirPlaying, cirFps, timeline.length]);
 
     const prevRequestedIdxRef = useRef(requestedCirIndex);
     useEffect(() => {
@@ -351,7 +353,7 @@ export default function ChannelSimPanel({
 
     // === CIR Canvas ===
     useEffect(() => {
-        if (activeComparisonReport || !cirCanvasRef.current || timeline.length === 0) return;
+        if (displayedComparisonReport || !cirCanvasRef.current || timeline.length === 0) return;
         const canvas = cirCanvasRef.current;
         const ctx = canvas.getContext('2d');
         const W = canvas.width, H = canvas.height;
@@ -495,7 +497,7 @@ export default function ChannelSimPanel({
         ctx.fillStyle = dopHz >= 0 ? '#7ecfff' : '#ffb347';
         ctx.fillText('Doppler: ' + dopSign + dopKHz.toFixed(2) + ' kHz (' + (dopHz >= 0 ? 'approaching ↑▲' : 'receding ↓▼') + ')', W - padR, 43);
 
-    }, [activeComparisonReport, timeline, cirIdx]);
+    }, [displayedComparisonReport, timeline, cirIdx]);
 
     // === CSV Export ===
     function exportCSV() {
@@ -590,8 +592,8 @@ export default function ChannelSimPanel({
     }
 
     // === Chart Data ===
-    const hasChannelOutput = timeline.length > 0 || Boolean(activeComparisonReport);
-    const showAnalyticsPanels = timeline.length > 0 && !activeComparisonReport;
+    const hasChannelOutput = timeline.length > 0 || Boolean(displayedComparisonReport);
+    const showAnalyticsPanels = timeline.length > 0 && !displayedComparisonReport;
     const chartLabels = useMemo(() => timeline.map(f => f.timeLabel), [timeline]);
 
     const rxSnrChartData = useMemo(() => ({
@@ -1247,6 +1249,8 @@ export default function ChannelSimPanel({
                             statisticalParameters={statisticalParameters}
                             parameterError={comparisonRequest.error}
                             onReportChange={handleComparisonReportChange}
+                            autoRun={Boolean(comparisonRequestKey && !activeComparisonReport)}
+                            preservePreviousReport={Boolean(comparisonPreviewReport)}
                         />
                     )}
                 </Suspense>
@@ -1267,10 +1271,12 @@ export default function ChannelSimPanel({
                         </div>
                     )}
 
-                    {activeComparisonReport ? (
+                    {displayedComparisonReport ? (
                         <PdpComparisonPlayer
                             key={comparisonRequestKey}
-                            report={activeComparisonReport}
+                            report={displayedComparisonReport}
+                            rtAvailable={Boolean(activeComparisonReport)}
+                            isRefreshing={isComparisonRefreshing}
                         />
                     ) : (
                     <div style={{ background: 'rgba(0,0,0,0.3)', borderRadius: '6px', padding: '12px', marginBottom: showAnalyticsPanels ? '15px' : 0 }}>

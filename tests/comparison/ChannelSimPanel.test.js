@@ -81,7 +81,11 @@ vi.mock('../../src/features/mpdb-import/MpdbImportPanel.jsx', () => ({
 }));
 
 vi.mock('../../src/features/channel-comparison/ChannelComparisonPanel.jsx', () => ({
-  default: ({ scenario, requestKey, onReportChange }) => createElement('div', null,
+  default: ({ scenario, requestKey, onReportChange, autoRun, preservePreviousReport }) => createElement('div', {
+    'data-testid': 'comparison-controls',
+    'data-auto-run': String(Boolean(autoRun)),
+    'data-preserve-preview': String(Boolean(preservePreviousReport)),
+  },
     createElement('button', {
       type: 'button',
       'aria-label': '测试发布比较报告',
@@ -99,7 +103,11 @@ vi.mock('../../src/features/channel-comparison/ChannelComparisonPanel.jsx', () =
 }));
 
 vi.mock('../../src/features/channel-comparison/PdpComparisonPlayer.jsx', () => ({
-  default: () => createElement('div', { 'data-testid': 'comparison-player' }, 'COMPARISON PLAYER'),
+  default: ({ rtAvailable, isRefreshing }) => createElement('div', {
+    'data-testid': 'comparison-player',
+    'data-rt-available': String(Boolean(rtAvailable)),
+    'data-refreshing': String(Boolean(isRefreshing)),
+  }, 'STATISTICAL PDP PLAYER'),
 }));
 
 function canvasContextStub() {
@@ -193,7 +201,7 @@ describe('ChannelSimPanel comparison mode transition', () => {
     expect(container.querySelector('input[type="range"]').value).toBe('1');
   });
 
-  it('permanently invalidates an old report across an A to B to A request transition', async () => {
+  it('keeps the statistical PDP visible and requests an automatic refresh after parameters change', async () => {
     const props = (tec) => ({
       tleLine1: 'tle-1',
       tleLine2: 'tle-2',
@@ -221,28 +229,21 @@ describe('ChannelSimPanel comparison mode transition', () => {
     act(() => container.querySelector('button[aria-label="测试导入 MPDB"]').click());
     await flushLazyModules();
     act(() => container.querySelector('button[aria-label="测试发布比较报告"]').click());
-    expect(container.querySelector('[data-testid="comparison-player"]')).not.toBeNull();
+    const activePlayer = container.querySelector('[data-testid="comparison-player"]');
+    expect(activePlayer).not.toBeNull();
+    expect(activePlayer.dataset.rtAvailable).toBe('true');
 
     renderWithTec(21);
-    expect(container.querySelector('[data-testid="comparison-player"]')).toBeNull();
-    const playButton = [...container.querySelectorAll('button')]
-      .find((button) => button.textContent.includes('Play'));
-    act(() => playButton.click());
-    act(() => vi.advanceTimersByTime(1_000));
-    expect(container.querySelector('input[type="range"]').value).toBe('1');
-    const pauseButton = [...container.querySelectorAll('button')]
-      .find((button) => button.textContent.includes('Pause'));
-    act(() => pauseButton.click());
+    const refreshingPlayer = container.querySelector('[data-testid="comparison-player"]');
+    expect(refreshingPlayer).not.toBeNull();
+    expect(refreshingPlayer.dataset.rtAvailable).toBe('false');
+    expect(refreshingPlayer.dataset.refreshing).toBe('true');
+    const controls = container.querySelector('[data-testid="comparison-controls"]');
+    expect(controls.dataset.autoRun).toBe('true');
+    expect(controls.dataset.preservePreview).toBe('true');
 
-    renderWithTec(20);
-    expect(container.querySelector('[data-testid="comparison-player"]')).toBeNull();
-    expect(container.querySelector('button[aria-label="测试发布比较报告"]')).not.toBeNull();
-
-    const resumedPlayButton = [...container.querySelectorAll('button')]
-      .find((button) => button.textContent.includes('Play') || button.textContent.includes('Pause'));
-    expect(resumedPlayButton.textContent).toContain('Play');
-    expect(container.querySelector('input[type="range"]').value).toBe('1');
-    act(() => vi.advanceTimersByTime(2_000));
-    expect(container.querySelector('input[type="range"]').value).toBe('1');
+    act(() => container.querySelector('button[aria-label="测试发布比较报告"]').click());
+    expect(container.querySelector('[data-testid="comparison-player"]').dataset.rtAvailable)
+      .toBe('true');
   });
 });

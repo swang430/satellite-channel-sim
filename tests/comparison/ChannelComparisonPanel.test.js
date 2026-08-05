@@ -133,6 +133,24 @@ describe('ChannelComparisonPanel', () => {
     expect(container.textContent).toContain('mpdb-statistical-comparison/v2');
   });
 
+  it('automatically refreshes a changed statistical request without clearing its preview', async () => {
+    compareScenarioMock.mockResolvedValue(reportFixture());
+    const onReportChange = vi.fn();
+
+    render({
+      autoRun: true,
+      preservePreviousReport: true,
+      onReportChange,
+    });
+    await flush();
+
+    expect(compareScenarioMock).toHaveBeenCalledTimes(1);
+    expect(onReportChange).not.toHaveBeenCalledWith(null);
+    expect(onReportChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      requestKey: 'request-a',
+    }));
+  });
+
   it('does not publish an old promise after request props change', async () => {
     const first = deferred();
     const second = deferred();
