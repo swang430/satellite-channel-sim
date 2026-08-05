@@ -1,11 +1,9 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Line, Bar } from 'react-chartjs-2';
-import JSZip from 'jszip';
-import { read as readMat } from 'mat-for-js';
-import { generateChannelTimeSeries, generateChannelTimeSeriesForTimestamps, generateChannelTimeSeriesFromGeometry, generateTrajectoryExport, predictPasses, calibrateModel, applyCalibration, createDefaultCalibration, getCalibParamDefs, calculateDopplerShift } from './model.js';
+import { generateChannelTimeSeries, predictPasses, calibrateModel, applyCalibration, createDefaultCalibration, getCalibParamDefs } from './model.js';
 import { getSatelliteList, getSatelliteBandParams } from './knownSatellites.js';
 import { SimulationValidator } from './ValidationModule.js';
-import { parseTrajectoryCsv } from './projectSync.js';
+import MpdbImportPanel from './features/mpdb-import/MpdbImportPanel.jsx';
 
 /**
  * Channel Propagation Simulator Panel
@@ -21,7 +19,6 @@ export default function ChannelSimPanel({
     groundStation,
     onGroundStationChange,
     onLinkParamsChange,
-    activeProjectManifest,
     requestedCirIndex,
     onCirSyncStateChange
 }) {
@@ -65,24 +62,14 @@ export default function ChannelSimPanel({
     const [calibMetadata, setCalibMetadata] = useState(null);
 
     // === Output State ===
-    const [importedTimeline, setImportedTimeline] = useState([]);
-    const [viewMode, setViewMode] = useState('imported'); // 'native' | 'imported'
     const [generatedTimeline, setGeneratedTimeline] = useState([]);
-    
-    const timeline = viewMode === 'imported' && importedTimeline.length > 0 ? importedTimeline : generatedTimeline;
+    const [mpdbScenario, setMpdbScenario] = useState(null);
+    const timeline = generatedTimeline;
     
     const [generatedTrajectorySamples, setGeneratedTrajectorySamples] = useState([]);
     const [computing, setComputing] = useState(false);
     const [cirIdx, setCirIdx] = useState(0);
     const [statusMsg, setStatusMsg] = useState('');
-    const [isStandaloneMode, setIsStandaloneMode] = useState(false);
-    const [linkedTrajectorySamples, setLinkedTrajectorySamples] = useState([]);
-    const [handshakeInfo, setHandshakeInfo] = useState(null);
-    const [linkedViewerTle, setLinkedViewerTle] = useState({ tleLine1: '', tleLine2: '' });
-    const [linkedGroundStation, setLinkedGroundStation] = useState(null);
-
-    // === External CIR Import (ZIP of .mat frames) ===
-    const [importInfo, setImportInfo] = useState(null);
     const [isCirPlaying, setIsCirPlaying] = useState(false);
     const [cirFps, setCirFps] = useState(1);
 
@@ -147,8 +134,8 @@ export default function ChannelSimPanel({
                 startTime = new Date(targetPass.aos.getTime() - 2 * 60000);
                 endTime = new Date(targetPass.los.getTime() + 2 * 60000);
                 currentDuration = Math.ceil(targetPass.durationSec / 60) + 4;
-            } else if (!linkedTrajectorySamples || linkedTrajectorySamples.length === 0) {
-                // No pass selected and no linked trajectory — auto-find next visible pass
+            } else {
+                // No pass selected — auto-find next visible pass
                 const autoPass = predictPasses(tleLine1, tleLine2, gsLat, gsLon, gsAlt, 24, 5);
                 if (autoPass && autoPass.length > 0) {
                     const best = autoPass[0];
@@ -161,55 +148,20 @@ export default function ChannelSimPanel({
                     endTime = new Date(startTime.getTime() + currentDuration * 60 * 1000);
                     setStatusMsg('\u26a0\ufe0f No visible pass in 24h. Generating from current time (satellite may be below horizon).');
                 }
-            } else {
-                startTime = new Date();
-                endTime = new Date(startTime.getTime() + currentDuration * 60 * 1000);
             }
             let linkParams = { freq, eirp, gRx, tRx, bandwidth, tec, env, rainRate, disableFastFading };
             if (useCalibration && calibProfile.calibrated) {
                 linkParams = applyCalibration(linkParams, calibProfile);
             }
-            let result;
-            // Priority: 1) imported CIR geometry (A/B comparison), 2) linked trajectory (SGP4), 3) auto-find pass
-            // When imported CIR exists, ALWAYS use its exact geometry — never re-propagate via SGP4
-            // because the imported data may use a different satellite than the currently loaded TLE
-            const importedGeometry = (importedTimeline && importedTimeline.length > 0)
-                ? importedTimeline.filter(f => f.elevation > 0 && f.slantRange > 0).map(f => ({
-                    time: f.time,
-                    elevation: f.elevation,
-                    azimuth: f.azimuth,
-                    slantRange: f.slantRange,
-                    satLat: f.satLat, satLon: f.satLon, satAlt: f.satAlt,
-                    dopplerHz: f.dopplerHz
-                  }))
-                : null;
-
-            if (importedGeometry && importedGeometry.length > 0) {
-                // A/B comparison: use exact geometry from imported CIR trajectory
-                result = generateChannelTimeSeriesFromGeometry(importedGeometry, linkParams);
-                setStatusMsg('\u2705 A/B: Generated native CIR at ' + importedGeometry.length + ' imported trajectory points (El ' + importedGeometry[0].elevation.toFixed(0) + '\u00b0\u2192' + importedGeometry[Math.floor(importedGeometry.length/2)].elevation.toFixed(0) + '\u00b0\u2192' + importedGeometry[importedGeometry.length-1].elevation.toFixed(0) + '\u00b0)');
-            } else if (linkedTrajectorySamples && linkedTrajectorySamples.length > 0) {
-                const timestamps = linkedTrajectorySamples.map(s => new Date(s.time));
-                result = generateChannelTimeSeriesForTimestamps(
-                    tleLine1, tleLine2,
-                    gsLat, gsLon, gsAlt,
-                    timestamps,
-                    linkParams
-                );
-            } else {
-                result = generateChannelTimeSeries(
-                    tleLine1, tleLine2,
-                    gsLat, gsLon, gsAlt,
-                    startTime, endTime, stepSec,
-                    linkParams
-                );
-            }
+            const result = generateChannelTimeSeries(
+                tleLine1, tleLine2,
+                gsLat, gsLon, gsAlt,
+                startTime, endTime, stepSec,
+                linkParams
+            );
             const trajectorySamples = buildTrajectorySamplesFromTimeline(result);
             setGeneratedTimeline(result);
             setGeneratedTrajectorySamples(trajectorySamples);
-            // We DO NOT clear importInfo or importedTimeline here, 
-            // so we preserve the A/B comparison state if the user generates native *after* importing
-            setViewMode('native');
             setIsCirPlaying(false);
             setCirIdx(0);
             const visibleFrames = result.filter(f => f.elevation > 0);
@@ -267,6 +219,22 @@ export default function ChannelSimPanel({
         updateGroundStation(next);
     }
 
+    const handleMpdbScenarioChange = useCallback((scenario) => {
+        setMpdbScenario(scenario);
+        const selected = scenario.groundSelection?.groundPosition;
+        if (selected) {
+            const nextGroundStation = {
+                lat: selected.latitude_deg,
+                lon: selected.longitude_deg,
+                alt: selected.altitude_m
+            };
+            setGsLat(nextGroundStation.lat);
+            setGsLon(nextGroundStation.lon);
+            setGsAlt(nextGroundStation.alt);
+            onGroundStationChange?.(nextGroundStation);
+        }
+    }, [onGroundStationChange]);
+
     function formatFrameTimeLabel(value, fallback = '') {
         if (!value) return fallback;
         const date = value instanceof Date ? value : new Date(value);
@@ -288,420 +256,6 @@ export default function ChannelSimPanel({
         })).filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lon));
     }
 
-    function buildTrajectorySamplesFromCsv(csvText) {
-        return parseTrajectoryCsv(csvText).map((point, index) => ({
-            index,
-            lat: safeNum(point.satLat, 0),
-            lon: safeNum(point.satLon, 0),
-            alt: safeNum(point.satAlt, 0),
-            azimuth: safeNum(point.azimuth, 0),
-            elevation: safeNum(point.elevation, 0),
-            slantRange: safeNum(point.slantRange, 0),
-            time: point.time || '',
-            timeLabel: formatFrameTimeLabel(point.time, `Frame ${index + 1}`)
-        }));
-    }
-
-    function getZipEntry(zip, entryName) {
-        return Object.values(zip.files).find((file) => !file.dir && file.name.split('/').pop().toLowerCase() === entryName.toLowerCase()) || null;
-    }
-
-    function getManifestGroundStation(manifest) {
-        if (!manifest?.groundStation) return null;
-        return {
-            lat: safeNum(manifest.groundStation.lat, gsLat),
-            lon: safeNum(manifest.groundStation.lon, gsLon),
-            alt: safeNum(manifest.groundStation.alt, gsAlt)
-        };
-    }
-
-    function buildTrajectorySamplesFromManifest(manifest) {
-        if (!manifest?.trajectory) return [];
-        const resolvedTleLine1 = manifest?.satellite?.tleLine1 || activeProjectManifest?.satellite?.tleLine1 || tleLine1;
-        const resolvedTleLine2 = manifest?.satellite?.tleLine2 || activeProjectManifest?.satellite?.tleLine2 || tleLine2;
-        if (!resolvedTleLine1 || !resolvedTleLine2) return [];
-
-        const manifestGroundStation = getManifestGroundStation(manifest) || getManifestGroundStation(activeProjectManifest) || { lat: gsLat, lon: gsLon, alt: gsAlt };
-        const startTime = manifest.trajectory.startTime ? new Date(manifest.trajectory.startTime) : new Date();
-        const stepMs = safeNum(manifest.trajectory.stepMs, 0);
-        const sampleCount = Math.max(0, Math.floor(safeNum(manifest.trajectory.sampleCount, 0)));
-        const durationMs = manifest.trajectory.durationMs != null
-            ? safeNum(manifest.trajectory.durationMs, 0)
-            : (sampleCount > 0 ? Math.max(0, (sampleCount - 1) * stepMs) : 0);
-
-        if (!sampleCount || stepMs <= 0) return [];
-
-        const exportPoints = generateTrajectoryExport(
-            resolvedTleLine1,
-            resolvedTleLine2,
-            manifestGroundStation.lat,
-            manifestGroundStation.lon,
-            manifestGroundStation.alt,
-            { startTime, durationMs, stepMs }
-        );
-        const trajectorySamples = exportPoints.map((point, index) => ({
-            index,
-            lat: safeNum(point.satLat, 0),
-            lon: safeNum(point.satLon, 0),
-            alt: safeNum(point.satAlt, 0),
-            azimuth: safeNum(point.azimuth, 0),
-            elevation: safeNum(point.elevation, 0),
-            slantRange: safeNum(point.range, 0),
-            time: point.time || '',
-            timeLabel: formatFrameTimeLabel(point.time, `Frame ${index + 1}`)
-        }));
-
-        return trajectorySamples.length === sampleCount ? trajectorySamples : [];
-    }
-
-    function applyTrajectoryToFrame(frame, sample, index) {
-        if (!sample) return frame;
-        const frameTime = sample.time ? new Date(sample.time) : frame.time;
-        // Compute Doppler from TLE + frame timestamp
-        let dopplerHz = 0;
-        if (frameTime && tleLine1 && tleLine2 && gsLat != null && gsLon != null) {
-            try {
-                const fq = frame.freqGHz ?? (globalParams?.freq ?? 12.0);
-                dopplerHz = calculateDopplerShift(tleLine1, tleLine2, gsLat, gsLon, gsAlt, frameTime, fq);
-            } catch (_) { dopplerHz = 0; }
-        }
-        return {
-            ...frame,
-            frameIndex: index,
-            time: frameTime,
-            timeLabel: sample.timeLabel || frame.timeLabel,
-            elevation: safeNum(sample.elevation, frame.elevation),
-            azimuth: safeNum(sample.azimuth, frame.azimuth),
-            slantRange: safeNum(sample.slantRange, frame.slantRange),
-            satLat: safeNum(sample.lat, frame.satLat),
-            satLon: safeNum(sample.lon, frame.satLon),
-            satAlt: safeNum(sample.alt, frame.satAlt),
-            dopplerHz
-        };
-    }
-
-    function describeHandshakeSource(source) {
-        switch (source) {
-            case 'task-id':
-                return 'Task_ID';
-            case 'trajectory-csv':
-                return 'trajectory.csv';
-            case 'frame-count':
-                return 'frame count';
-            case 'manifest':
-                return 'manifest';
-            case 'active-project':
-                return 'active project';
-            default:
-                return source || 'standalone';
-        }
-    }
-
-    function buildCirFromRays(rays) {
-        // rays: array of rows (N x 19)
-        // Confirmed column mapping (from MAT data analysis):
-        //   col[2]  : absolute propagation delay (seconds)
-        //   col[4]  : E-field Real part
-        //   col[5]  : E-field Imaginary part
-        //   col[8]  : arrival phase (degrees, -180~+180) -- NOT power!
-        // BUG FIX: previously used col[8] (phase) as amplitude_dB, causing all
-        //          taps to appear at similar power levels in the PDP plot.
-        //          Now correctly derived from |E| = sqrt(col4^2 + col5^2).
-
-        const MIN_E_MAG = 1e-30; // floor to avoid log(0)
-
-        const taps = (rays || []).map((row, i) => {
-            const delay_s = safeNum(row?.[2], 0);
-            const delay_ns = delay_s * 1e9;
-
-            // Correct: compute path amplitude from E-field complex magnitude
-            const eRe = safeNum(row?.[4], 0);
-            const eIm = safeNum(row?.[5], 0);
-            const eMag = Math.sqrt(eRe * eRe + eIm * eIm);
-            const amp_dB = 20 * Math.log10(Math.max(eMag, MIN_E_MAG));
-
-            // Store phase for reference
-            const phase_deg = safeNum(row?.[8], 0);
-
-            return {
-                excessDelay_ns: delay_ns,
-                amplitude_dB: amp_dB,
-                phase_rad: phase_deg * Math.PI / 180,
-                label: 'Tap' + (i + 1)
-            };
-        }).sort((a, b) => a.excessDelay_ns - b.excessDelay_ns);
-
-        let absoluteDelay_ns = 0;
-        // Normalize excessDelay_ns to start at 0
-        if (taps.length > 0) {
-            const minDelay = taps[0].excessDelay_ns;
-            absoluteDelay_ns = minDelay;
-            taps.forEach(t => t.excessDelay_ns -= minDelay);
-        }
-
-        // Normalize so strongest tap = 0 dB (relative PDP)
-        const maxAmp = taps.length > 0 ? Math.max(...taps.map(t => t.amplitude_dB)) : 0;
-        taps.forEach(t => { t.amplitude_dB -= maxAmp; });
-
-        // Drop taps more than 80 dB below the strongest (insignificant)
-        const DYNAMIC_RANGE_DB = 80;
-        const filteredTaps = taps.filter(t => t.amplitude_dB >= -DYNAMIC_RANGE_DB);
-        const finalTaps = filteredTaps.length > 0 ? filteredTaps : taps.slice(0, 1);
-
-        // Compute RMS delay spread using power-weighted mean
-        const pLin = finalTaps.map(t => Math.pow(10, t.amplitude_dB / 10));
-        const sumP = pLin.reduce((a, b) => a + b, 0) || 1;
-        const meanTau = finalTaps.reduce((acc, t, idx) => acc + t.excessDelay_ns * pLin[idx], 0) / sumP;
-        const meanTau2 = finalTaps.reduce((acc, t, idx) => acc + (t.excessDelay_ns ** 2) * pLin[idx], 0) / sumP;
-        const rms = Math.sqrt(Math.max(0, meanTau2 - meanTau ** 2));
-        const coherenceMHz = rms > 0 ? (1 / (5 * rms * 1e-9)) / 1e6 : 0; // ~1/(5*sigma_tau)
-
-        return {
-            taps: finalTaps.length ? finalTaps : [{ excessDelay_ns: 0, amplitude_dB: 0, label: 'LOS' }],
-            rmsDelaySpread_ns: safeNum(rms, 0),
-            coherenceBandwidth_MHz: safeNum(coherenceMHz, 0),
-            absoluteDelay_ns: safeNum(absoluteDelay_ns, 0)
-        };
-    }
-
-    async function handleImportCirZip(file) {
-        if (!file) return;
-        setComputing(true);
-        setStatusMsg('\u23f3 Importing CIR frames from ZIP...');
-        try {
-            const ab = await file.arrayBuffer();
-            const zip = await JSZip.loadAsync(ab);
-            const manifestEntry = getZipEntry(zip, 'manifest.json');
-            const trajectoryEntry = getZipEntry(zip, 'trajectory.csv');
-            const entries = Object.keys(zip.files)
-                .filter(name => name.toLowerCase().endsWith('.mat') && !zip.files[name].dir && !name.includes('__MACOSX'));
-
-            if (entries.length === 0) {
-                setStatusMsg('\u26a0\ufe0f No .mat files found in ZIP');
-                setComputing(false);
-                return;
-            }
-
-            function frameIndexFromName(name) {
-                const m = name.match(/(\d+)/g);
-                if (!m) return Number.MAX_SAFE_INTEGER;
-                return parseInt(m[m.length - 1], 10);
-            }
-
-            entries.sort((a, b) => frameIndexFromName(a) - frameIndexFromName(b));
-
-            let importedManifest = null;
-            if (manifestEntry) {
-                try {
-                    importedManifest = JSON.parse(await manifestEntry.async('string'));
-                } catch (err) {
-                    console.warn('Failed to parse manifest.json from CIR ZIP:', err);
-                }
-            }
-
-            if (importedManifest?.groundStation) {
-                updateGroundStation(getManifestGroundStation(importedManifest));
-            }
-
-            let zipTrajectorySamples = [];
-            if (trajectoryEntry) {
-                try {
-                    zipTrajectorySamples = buildTrajectorySamplesFromCsv(await trajectoryEntry.async('string'));
-                } catch (err) {
-                    console.warn('Failed to parse trajectory.csv from CIR ZIP:', err);
-                }
-            }
-
-            const frames = [];
-            for (let i = 0; i < entries.length; i++) {
-                const name = entries[i];
-                const u8 = await zip.files[name].async('uint8array');
-                const ab = u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
-                const matFile = readMat(ab);
-                const mat = matFile?.data || matFile;
-
-                // mat-for-js returns {header, data}
-                const numberRays = safeNum(mat?.NumberRays?.[0], 0);
-                let rays = mat?.RaysProperties;
-
-                // Normalize RaysProperties into array-of-rows
-                // Common shapes: [N][19] or flat [1][19]
-                if (Array.isArray(rays) && Array.isArray(rays[0]) && typeof rays[0][0] === 'number') {
-                    // already rows
-                } else if (Array.isArray(rays) && typeof rays[0] === 'number') {
-                    rays = [rays];
-                } else {
-                    rays = [];
-                }
-
-                // If NumberRays hints multiple rays but rays parsed as flat, try chunking
-                if (numberRays > 1 && rays.length === 1 && rays[0].length === numberRays * 19) {
-                    const flat = rays[0];
-                    rays = [];
-                    for (let r = 0; r < numberRays; r++) rays.push(flat.slice(r * 19, (r + 1) * 19));
-                }
-
-                const cir = buildCirFromRays(rays);
-                const idx = frameIndexFromName(name);
-                
-                // Get path loss (ReceivedPower_COH or NONCOH)
-                const rxPower = safeNum(mat?.ReceivedPower_NONCOH?.[0], -150);
-
-                // 提取频率信息（常见字段：CenterFrequency、Frequency，单位 Hz）
-                const rawFreqHz = mat?.CenterFrequency?.[0] ?? mat?.Frequency?.[0] ?? mat?.freq?.[0] ?? null;
-                const frameFreqGHz = rawFreqHz != null ? safeNum(rawFreqHz, 0) / 1e9 : null;
-                
-                frames.push({
-                    frameIndex: i,
-                    importedFrameId: idx,
-                    timeLabel: `Imported frame ${idx}`,
-                    freqGHz: frameFreqGHz,
-                    elevation: 10,
-                    azimuth: 0,
-                    slantRange: 0,
-                    absoluteFspl: -rxPower, // In imported mat, absoluteFspl will hold path loss
-                    rxPowerDbm: rxPower,
-                    rtPathLoss: rxPower,       // RT engine total received power (dB, positive = loss)
-                    isImportedFrame: true,
-                    dopplerHz: 0,              // filled after handshake merge below
-                    snrDb: 0,
-                    noiseFloorDbm: -100,
-                    attRain: 0,
-                    attGas: 0,
-                    attCloud: 0,
-                    totalAtmosphericLoss: 0,
-                    fadeLMS: 0,
-                    lossFaraday: 0,
-                    pointingLoss: 0,
-                    scanLoss: 0,
-                    multipathLoss: 0,
-                    scintLoss: 0,
-                    tSky: 0,
-                    xpd: 0,
-                    capRank1: 0,
-                    capRank2: 0,
-                    groupDelayNs: cir.taps[0].excessDelay_ns,
-                    dispersionNs: cir.rmsDelaySpread_ns,
-                    satLat: 0,
-                    satLon: 0,
-                    satAlt: 0,
-                    cir
-                });
-            }
-
-            // === Direct geometry injection from trajectory.csv (independent of handshake) ===
-            // This ensures imported frames always have correct el/az/range even in standalone mode
-            if (zipTrajectorySamples.length > 0 && zipTrajectorySamples.length === frames.length) {
-                frames.forEach((f, idx) => {
-                    const ts = zipTrajectorySamples[idx];
-                    if (ts) {
-                        f.elevation = ts.elevation ?? f.elevation;
-                        f.azimuth = ts.azimuth ?? f.azimuth;
-                        f.slantRange = ts.slantRange ?? f.slantRange;
-                        f.satLat = ts.lat ?? ts.satLat ?? f.satLat;
-                        f.satLon = ts.lon ?? ts.satLon ?? f.satLon;
-                        f.satAlt = ts.alt ?? ts.satAlt ?? f.satAlt;
-                        if (ts.time) {
-                            f.time = new Date(ts.time);
-                            f.timeLabel = new Date(ts.time).toLocaleTimeString();
-                        }
-                    }
-                });
-                console.log('[CIR Import] Injected trajectory.csv geometry into', frames.length, 'frames');
-            } else if (zipTrajectorySamples.length > 0) {
-                console.warn('[CIR Import] trajectory.csv has', zipTrajectorySamples.length, 'rows but', frames.length, 'frames — skipping geometry injection');
-            }
-
-            let handshakeSource = '';
-            let handshakeSamples = [];
-            let handshakeManifest = null;
-            let handshakeTle = { tleLine1: '', tleLine2: '' };
-            let handshakeGroundStation = null;
-
-            const activeManifestMatchesFrameCount = activeProjectManifest?.trajectory?.sampleCount === frames.length;
-            const taskIdMatches = importedManifest?.Task_ID && activeProjectManifest?.Task_ID && importedManifest.Task_ID === activeProjectManifest.Task_ID;
-
-            if (zipTrajectorySamples.length === frames.length) {
-                handshakeSource = 'trajectory-csv';
-                handshakeSamples = zipTrajectorySamples;
-                handshakeManifest = importedManifest || activeProjectManifest || null;
-            } else if (generatedTrajectorySamples.length === frames.length) {
-                handshakeSource = 'frame-count';
-                handshakeSamples = generatedTrajectorySamples;
-                handshakeManifest = importedManifest || null;
-            } else {
-                const manifestCandidate = taskIdMatches
-                    ? (importedManifest || activeProjectManifest)
-                    : (importedManifest || (activeManifestMatchesFrameCount ? activeProjectManifest : null));
-                if (manifestCandidate) {
-                    const manifestSamples = buildTrajectorySamplesFromManifest(manifestCandidate);
-                    if (manifestSamples.length === frames.length) {
-                        handshakeSource = taskIdMatches ? 'task-id' : (manifestCandidate === activeProjectManifest ? 'active-project' : 'manifest');
-                        handshakeSamples = manifestSamples;
-                        handshakeManifest = manifestCandidate;
-                    }
-                }
-            }
-
-            if (handshakeSamples.length === frames.length) {
-                handshakeTle = {
-                    tleLine1: handshakeManifest?.satellite?.tleLine1 || activeProjectManifest?.satellite?.tleLine1 || tleLine1 || '',
-                    tleLine2: handshakeManifest?.satellite?.tleLine2 || activeProjectManifest?.satellite?.tleLine2 || tleLine2 || ''
-                };
-                handshakeGroundStation = getManifestGroundStation(handshakeManifest)
-                    || getManifestGroundStation(activeProjectManifest)
-                    || { lat: gsLat, lon: gsLon, alt: gsAlt };
-            }
-
-            const linkedFrames = handshakeSamples.length === frames.length
-                ? frames.map((frame, index) => applyTrajectoryToFrame(frame, handshakeSamples[index], index))
-                : frames;
-
-            setImportedTimeline(linkedFrames);
-            setViewMode('imported');
-            setIsCirPlaying(false);
-            setCirIdx(0);
-            setImportInfo({
-                name: file.name,
-                frames: frames.length,
-                hasManifest: Boolean(importedManifest),
-                standalone: handshakeSamples.length !== frames.length,
-                handshakeSource,
-                taskId: importedManifest?.Task_ID || handshakeManifest?.Task_ID || null,
-                // 频率：取所有帧中第一个有效值
-                freqGHz: frames.find(f => f.freqGHz != null)?.freqGHz ?? null
-            });
-
-            if (handshakeSamples.length === frames.length) {
-                setIsStandaloneMode(false);
-                setLinkedTrajectorySamples(handshakeSamples);
-                setHandshakeInfo({
-                    linked: true,
-                    source: handshakeSource,
-                    taskId: importedManifest?.Task_ID || handshakeManifest?.Task_ID || null
-                });
-                setLinkedViewerTle(handshakeTle);
-                setLinkedGroundStation(handshakeGroundStation);
-                setStatusMsg(`\u2705 Imported ${frames.length} CIR frames from ${file.name} and linked them via ${describeHandshakeSource(handshakeSource)}. Click the highlighted trajectory samples to jump frames.`);
-            } else {
-                setIsStandaloneMode(true);
-                setLinkedTrajectorySamples([]);
-                setHandshakeInfo({
-                    linked: false,
-                    source: 'standalone',
-                    taskId: importedManifest?.Task_ID || null
-                });
-                setLinkedViewerTle({ tleLine1: '', tleLine2: '' });
-                setLinkedGroundStation(null);
-                setStatusMsg(`\u2705 Imported ${frames.length} CIR frames from ${file.name} in standalone viewer mode. Skyplot and trajectory views are hidden until a project handshake is available.`);
-            }
-        } catch (e) {
-            console.error(e);
-            setStatusMsg('\u26a0\ufe0f Import failed: ' + (e?.message || String(e)));
-        } finally {
-            setComputing(false);
-        }
-    }
 
     // === CIR playback ===
     useEffect(() => {
@@ -740,25 +294,29 @@ export default function ChannelSimPanel({
 
     useEffect(() => {
         onCirSyncStateChange?.({
-            isStandaloneMode,
+            isStandaloneMode: false,
             activeIndex: timeline.length ? cirIdx : 0,
-            samplePoints: linkedTrajectorySamples,
-            handshake: handshakeInfo,
-            importInfo,
-            tleLine1: linkedViewerTle.tleLine1,
-            tleLine2: linkedViewerTle.tleLine2,
-            groundStation: linkedGroundStation
+            samplePoints: generatedTrajectorySamples,
+            handshake: null,
+            importInfo: mpdbScenario ? {
+                format: mpdbScenario.source.format,
+                scenarioId: mpdbScenario.scenarioId,
+                selectedFrameId: mpdbScenario.groundSelection?.selectedFrameId ?? null
+            } : null,
+            tleLine1,
+            tleLine2,
+            groundStation: { lat: gsLat, lon: gsLon, alt: gsAlt }
         });
     }, [
-        isStandaloneMode,
         cirIdx,
         timeline.length,
-        linkedTrajectorySamples,
-        handshakeInfo,
-        importInfo,
-        linkedViewerTle.tleLine1,
-        linkedViewerTle.tleLine2,
-        linkedGroundStation,
+        generatedTrajectorySamples,
+        mpdbScenario,
+        tleLine1,
+        tleLine2,
+        gsLat,
+        gsLon,
+        gsAlt,
         onCirSyncStateChange
     ]);
 
@@ -1002,28 +560,8 @@ export default function ChannelSimPanel({
         URL.revokeObjectURL(url);
     }
 
-    function handleClearImportedCir() {
-        setIsCirPlaying(false);
-        setImportInfo(null);
-        setIsStandaloneMode(false);
-        setLinkedTrajectorySamples([]);
-        setHandshakeInfo(null);
-        setLinkedViewerTle({ tleLine1: '', tleLine2: '' });
-        setLinkedGroundStation(null);
-        setImportedTimeline([]);
-        setViewMode('native');
-        if (generatedTimeline.length > 0) {
-            setCirIdx(Math.min(cirIdx, Math.max(0, generatedTimeline.length - 1)));
-            setStatusMsg('Cleared imported CIR and restored the generated channel timeline.');
-        } else {
-            setCirIdx(0);
-            setStatusMsg('Cleared imported CIR.');
-        }
-    }
-
     // === Chart Data ===
-    const isImportedTimeline = Boolean(importInfo);
-    const showAnalyticsPanels = timeline.length > 0 && !isImportedTimeline;
+    const showAnalyticsPanels = timeline.length > 0;
     const chartLabels = useMemo(() => timeline.map(f => f.timeLabel), [timeline]);
 
     const rxSnrChartData = useMemo(() => ({
@@ -1646,71 +1184,15 @@ export default function ChannelSimPanel({
                 </div>
             )}
 
-            <div style={{ background: 'rgba(0,0,0,0.3)', borderRadius: '6px', padding: '12px', marginBottom: timeline.length > 0 ? '15px' : 0 }}>
-                <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', marginBottom: timeline.length > 0 ? '10px' : 0 }}>
-                    <strong style={{ fontSize: '0.9em' }}>Import CIR:</strong>
-                    <input
-                        type="file"
-                        accept=".zip"
-                        onChange={e => handleImportCirZip(e.target.files?.[0])}
-                        style={{ maxWidth: '320px' }}
-                    />
-                    {importInfo && (
-                        <span style={{ fontFamily: 'monospace', fontSize: '0.85em', color: '#88ccff' }}>
-                            Loaded: {importInfo.name} ({importInfo.frames} frames)
-                        </span>
-                    )}
-                    {importInfo && (
-                        <span style={{
-                            fontSize: '0.78em',
-                            padding: '2px 8px',
-                            borderRadius: '999px',
-                            background: isStandaloneMode ? 'rgba(255,107,107,0.14)' : 'rgba(255,214,10,0.16)',
-                            border: isStandaloneMode ? '1px solid rgba(255,107,107,0.35)' : '1px solid rgba(255,214,10,0.35)',
-                            color: isStandaloneMode ? '#ffb3b3' : '#ffd60a'
-                        }}>
-                            {isStandaloneMode ? 'Standalone CIR Viewer' : `Linked via ${describeHandshakeSource(importInfo.handshakeSource)}`}
-                        </span>
-                    )}
-                    <button
-                        onClick={handleClearImportedCir}
-                        style={{ padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', background: '#2c3e50', color: '#eee', border: '1px solid #555' }}
-                    >
-                        Clear
-                    </button>
-                    {importInfo && (
-                        <>
-                            <button onClick={exportCSV} style={{ ...btnExport, background: '#138496', color: '#fff', borderColor: '#117a8b' }}>
-                                {'\ud83d\udce5'} Export CSV
-                            </button>
-                            {importInfo.taskId && (
-                                <span style={{ fontSize: '0.8em', color: '#ffd60a', fontFamily: 'monospace' }}>
-                                    Task_ID: {importInfo.taskId.slice(0, 8)}...
-                                </span>
-                            )}
-                            <span style={{
-                                fontSize: '0.8em', fontFamily: 'monospace', padding: '2px 8px', borderRadius: '999px',
-                                background: importInfo.freqGHz != null ? 'rgba(78,205,196,0.15)' : 'rgba(150,150,150,0.1)',
-                                border: importInfo.freqGHz != null ? '1px solid rgba(78,205,196,0.4)' : '1px solid rgba(150,150,150,0.3)',
-                                color: importInfo.freqGHz != null ? '#4ecdc4' : '#888'
-                            }}>
-                                📡 {importInfo.freqGHz != null ? `${importInfo.freqGHz.toFixed(2)} GHz` : 'Freq: 未知'}
-                            </span>
-                            {!isStandaloneMode && (
-                                <span style={{ fontSize: '0.85em', color: '#ccc', marginLeft: 'auto' }}>
-                                    Click a highlighted point in the trajectory view to jump this CIR frame.
-                                </span>
-                            )}
-                        </>
-                    )}
-                </div>
-
-                {timeline.length === 0 && (
-                    <div style={{ fontSize: '0.85em', color: '#aaa' }}>
-                        Import a CIR ZIP to open the viewer, or generate a channel timeline to simulate and export locally.
-                    </div>
-                )}
+            <div data-mpdb-scenario-id={mpdbScenario?.scenarioId ?? ''}>
+                <MpdbImportPanel onScenarioChange={handleMpdbScenarioChange} />
             </div>
+
+            {timeline.length === 0 && (
+                <div style={{ fontSize: '0.85em', color: '#aaa', marginBottom: '15px' }}>
+                    导入 MPDB 后选择地面帧以准备比较，或生成统计信道时间线。
+                </div>
+            )}
 
             {/* === Output Area === */}
             {timeline.length > 0 && (
@@ -1722,11 +1204,6 @@ export default function ChannelSimPanel({
                     )}
 
                     <div style={{ background: 'rgba(0,0,0,0.3)', borderRadius: '6px', padding: '12px', marginBottom: showAnalyticsPanels ? '15px' : 0 }}>
-                        {isStandaloneMode && (
-                            <div style={{ marginBottom: '8px', fontSize: '0.82em', color: '#ffb3b3' }}>
-                                Standalone CIR Viewer Mode: trajectory and skyplot linkage are unavailable for this import.
-                            </div>
-                        )}
                         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap' }}>
                             <strong style={{ fontSize: '0.9em' }}>CIR Frame:</strong>
                             <button
@@ -1737,20 +1214,6 @@ export default function ChannelSimPanel({
                             </button>
                             <span style={{ fontSize: '0.85em', color: '#aaa' }}>FPS</span>
                             <input type="number" min={1} max={60} value={cirFps} onChange={e => setCirFps(parseInt(e.target.value || '5'))} style={{ width: '70px' }} />
-
-                            {importedTimeline.length > 0 && generatedTimeline.length > 0 && (
-                                <button
-                                    onClick={() => setViewMode(m => m === 'native' ? 'imported' : 'native')}
-                                    style={{
-                                        padding: '4px 10px', borderRadius: '4px', cursor: 'pointer',
-                                        background: 'rgba(255,255,255,0.1)', color: '#fff', border: '1px solid rgba(255,255,255,0.3)',
-                                        marginLeft: '10px', fontSize: '0.85em', display: 'flex', alignItems: 'center', gap: '5px'
-                                    }}
-                                    title="Toggle between natively generated SGP4 CIR and imported Ray-Tracing CIR"
-                                >
-                                    🔄 <span style={{display:'inline-block',width:'10em',textAlign:'left'}}>{viewMode === 'native' ? 'Native CIR' : 'RT CIR (Imported)'}</span>
-                                </button>
-                            )}
 
                             <input
                                 type="range"
