@@ -9,11 +9,21 @@
  */
 
 import { createServer } from 'node:http';
-import { parse as parseUrl } from 'node:url';
 import { networkInterfaces } from 'node:os';
 import { WebSocketServer } from 'ws';
 import { ORBIT_SATELLITES, getOrbitSatellite } from '../src/knownSatellites.js';
 import { diagnoseTleAge, withTleDiagnostics } from '../src/orbit/tle.js';
+import {
+  InputValidationError,
+  WS_MAX_REQUEST_BYTES,
+  assertWsRequestAllowed,
+  extractLinkParams,
+  parseGroundStation,
+  parseHours,
+  parseWsRequest,
+  resolveServerHost,
+  validateTle,
+} from './inputValidation.js';
 
 // Dynamic import so Vite doesn't try to bundle this during `npm run build`
 async function loadOracle() {
@@ -22,7 +32,7 @@ async function loadOracle() {
 }
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
-const HOST = process.env.HOST || '0.0.0.0';
+const HOST = resolveServerHost(process.env);
 
 // ─── Helpers ────────────────────────────────────────────────────────────
 function sendJSON(res, code, data) {
@@ -36,20 +46,13 @@ function sendJSON(res, code, data) {
 }
 
 function parseQuery(url) {
-  const q = {};
-  const search = url.split('?')[1];
-  if (!search) return q;
-  for (const pair of search.split('&')) {
-    const [k, v] = pair.split('=').map(decodeURIComponent);
-    q[k] = v;
-  }
-  return q;
+  return Object.fromEntries(new URL(url, 'http://localhost').searchParams.entries());
 }
 
 function resolveSat(query) {
   // Priority: explicit TLE > known satellite name
   if (query.tle1 && query.tle2) {
-    const custom = { tleLine1: query.tle1, tleLine2: query.tle2, name: 'custom' };
+    const custom = { ...validateTle(query.tle1, query.tle2), name: 'custom' };
     return { ...custom, tleDiagnostics: diagnoseTleAge(custom) };
   }
   const satName = query.sat || 'ISS';
@@ -66,12 +69,7 @@ function resolveSat(query) {
 }
 
 function resolveGroundStation(query) {
-  const gs = query.gs || '31.23,121.47,0';
-  const parts = gs.split(',').map(Number);
-  if (parts.length < 2 || isNaN(parts[0]) || isNaN(parts[1])) {
-    return { lat: 31.23, lon: 121.47, alt: 0 };
-  }
-  return { lat: parts[0], lon: parts[1], alt: parts[2] || 0 };
+  return parseGroundStation(query.gs);
 }
 
 // ─── Routes ─────────────────────────────────────────────────────────────
@@ -100,9 +98,10 @@ async function handlePredictNow(req, res, oracle) {
   if (!sat) return sendJSON(res, 400, { error: 'Unknown satellite', known: Object.keys(ORBIT_SATELLITES) });
   
   const gs = resolveGroundStation(query);
+  const linkParams = extractLinkParams(query);
   
   try {
-    const result = oracle.predictLinkStateNow(sat, gs.lat, gs.lon, gs.alt);
+    const result = oracle.predictLinkStateNow(sat, gs.lat, gs.lon, gs.alt, linkParams);
     if (!result) {
       return sendJSON(res, 200, withTleDiagnostics({
         status: 'no_contact',
@@ -123,10 +122,11 @@ async function handlePredictWindow(req, res, oracle) {
   if (!sat) return sendJSON(res, 400, { error: 'Unknown satellite', known: Object.keys(ORBIT_SATELLITES) });
   
   const gs = resolveGroundStation(query);
-  const hours = Math.min(72, Math.max(1, parseInt(query.hours || '24') || 24));
+  const hours = parseHours(query.hours);
+  const linkParams = extractLinkParams(query);
   
   try {
-    const predictions = oracle.predictLinkStateWindow(sat, gs.lat, gs.lon, gs.alt, hours);
+    const predictions = oracle.predictLinkStateWindow(sat, gs.lat, gs.lon, gs.alt, hours, linkParams);
     sendJSON(res, 200, {
       status: 'ok',
       satellite: sat.name,
@@ -147,10 +147,11 @@ async function handlePredictMods(req, res, oracle) {
   if (!sat) return sendJSON(res, 400, { error: 'Unknown satellite', known: Object.keys(ORBIT_SATELLITES) });
   
   const gs = resolveGroundStation(query);
-  const hours = Math.min(72, Math.max(1, parseInt(query.hours || '24') || 24));
+  const hours = parseHours(query.hours);
+  const linkParams = extractLinkParams(query);
   
   try {
-    const predictions = oracle.predictLinkStateWindow(sat, gs.lat, gs.lon, gs.alt, hours);
+    const predictions = oracle.predictLinkStateWindow(sat, gs.lat, gs.lon, gs.alt, hours, linkParams);
     
     // Extract MODCOD recommendations for each pass
     const modcodTimeline = [];
@@ -200,6 +201,7 @@ async function handleSatellites(req, res) {
 function setupWebSocket(wss, oracle) {
   wss.on('connection', (ws) => {
     console.log('[ws] client connected');
+    let lastRequestAt = null;
     
     ws.send(JSON.stringify({ 
       type: 'connected', 
@@ -209,22 +211,29 @@ function setupWebSocket(wss, oracle) {
     
     ws.on('message', async (data) => {
       try {
-        const msg = JSON.parse(data.toString());
-        const { sat: satId, gs: gsStr, hours } = msg;
+        const now = Date.now();
+        assertWsRequestAllowed(lastRequestAt, now);
+        lastRequestAt = now;
+        const request = parseWsRequest(data);
+        const sat = getOrbitSatellite(request.sat);
+        if (!sat) throw new InputValidationError('UNKNOWN_SATELLITE', `Unknown satellite: ${request.sat}`, 'sat');
+        const gs = request.groundStation;
         
-        const sat = getOrbitSatellite(satId || 'ISS') || ORBIT_SATELLITES.ISS;
-        const gsParts = (gsStr || '31.23,121.47,0').split(',').map(Number);
-        const gs = { lat: gsParts[0], lon: gsParts[1], alt: gsParts[2] || 0 };
-        const lookahead = Math.min(72, Math.max(1, parseInt(hours || '24') || 24));
-        
-        const predictions = oracle.predictLinkStateWindow(sat, gs.lat, gs.lon, gs.alt, lookahead);
+        const predictions = oracle.predictLinkStateWindow(
+          sat,
+          gs.lat,
+          gs.lon,
+          gs.alt,
+          request.hours,
+          request.linkParams,
+        );
         
         ws.send(JSON.stringify({
           type: 'prediction',
           satellite: sat.name,
           tleDiagnostics: diagnoseTleAge(sat),
           groundStation: { lat: gs.lat, lon: gs.lon, alt: gs.alt },
-          lookaheadHours: lookahead,
+          lookaheadHours: request.hours,
           passCount: predictions.length,
           predictions
         }));
@@ -255,8 +264,7 @@ async function main() {
       return res.end();
     }
 
-    const parsed = parseUrl(req.url, true);
-    const path = parsed.pathname;
+    const path = new URL(req.url, 'http://localhost').pathname;
 
     try {
       if (path === '/api/v1/health') {
@@ -281,13 +289,21 @@ async function main() {
         ]});
       }
     } catch (e) {
-      console.error('[api] Unhandled error:', e);
-      sendJSON(res, 500, { error: 'Internal server error' });
+      if (e instanceof InputValidationError) {
+        sendJSON(res, 400, { error: e.message, code: e.code, path: e.path });
+      } else {
+        console.error('[api] Unhandled error:', e);
+        sendJSON(res, 500, { error: 'Internal server error' });
+      }
     }
   });
 
   // WebSocket on the same server
-  const wss = new WebSocketServer({ server, path: '/api/v1/predict/stream' });
+  const wss = new WebSocketServer({
+    server,
+    path: '/api/v1/predict/stream',
+    maxPayload: WS_MAX_REQUEST_BYTES,
+  });
   setupWebSocket(wss, oracle);
 
   server.listen(PORT, HOST, () => {
@@ -297,11 +313,13 @@ async function main() {
     console.log(`  Local:   http://localhost:${PORT}`);
     
     // Show LAN IPs
-    const nets = networkInterfaces();
-    for (const [name, addrs] of Object.entries(nets)) {
-      for (const addr of addrs || []) {
-        if (addr.family === 'IPv4' && !addr.internal) {
-          console.log(`  LAN:     http://${addr.address}:${PORT}`);
+    if (HOST === '0.0.0.0' || HOST === '::') {
+      const nets = networkInterfaces();
+      for (const addrs of Object.values(nets)) {
+        for (const addr of addrs || []) {
+          if (addr.family === 'IPv4' && !addr.internal) {
+            console.log(`  LAN:     http://${addr.address}:${PORT}`);
+          }
         }
       }
     }

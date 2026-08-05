@@ -15,9 +15,7 @@
 
 import { 
   predictPasses,
-  generateChannelTimeSeries,
-  calculateMIMOCapacity,
-  computeCIR
+  generateChannelTimeSeries
 } from './model.js';
 
 // ─── Default Link Parameters (Ka-band LEO typical) ─────────────────────
@@ -79,8 +77,6 @@ function mapToNTNParams(timeline) {
   }).filter(d => d > 0);
   
   const dopplers = timeline.map(t => t.dopplerHz || 0);
-  const snrs = timeline.map(t => t.snrDb || -30);
-  
   const avgDelay = delays.length > 0 
     ? delays.reduce((a,b) => a+b, 0) / delays.length 
     : 0;
@@ -98,7 +94,8 @@ function mapToNTNParams(timeline) {
     dopplerRate_HzPerSample: dopplerRate,
     kFactor_dB: computeKFactor(timeline),
     numClusters: delays.length > 3 ? 4 : delays.length,
-    pathLoss_dB: snrs.length > 0 ? -Math.min(...snrs) : 0,  // worst-case
+    pathLoss: { status: 'unavailable', reason: 'PATH_LOSS_NOT_PROVIDED' },
+    modelStatus: 'heuristic-not-standard-compliant',
     fadingModel: 'Rician',  // LOS + scattering
     elevationRange_deg: [
       Math.min(...timeline.map(t => t.elevation || 0)),
@@ -361,27 +358,25 @@ export function markConfidence(linkStates, comparisonReport = null) {
  * Maps a predicted SNR to a DVB-S2X MODCOD recommendation.
  */
 export function recommendMODCOD(snrDb) {
-  let best = MODCOD_TABLE[0];
-  for (const entry of MODCOD_TABLE) {
-    if (snrDb >= entry.minSnr && entry.minSnr >= best.minSnr) {
-      best = entry;
-    }
-  }
+  if (!Number.isFinite(snrDb)) throw new TypeError('SNR must be finite');
+  const select = (value) => MODCOD_TABLE
+    .filter((entry) => value >= entry.minSnr)
+    .reduce((best, entry) => (!best || entry.minSnr >= best.minSnr ? entry : best), null);
+  const best = select(snrDb);
   // Add margin for prediction uncertainty
   const marginDb = 1.0;
   const safeSnr = snrDb - marginDb;
-  let safe = MODCOD_TABLE[0];
-  for (const entry of MODCOD_TABLE) {
-    if (safeSnr >= entry.minSnr && entry.minSnr >= safe.minSnr) {
-      safe = entry;
-    }
-  }
+  const safe = select(safeSnr);
   
   return {
-    predicted: best.modcod,
-    safeRecommendation: safe.modcod,
-    spectralEfficiency_bpsHz: best.spectralEfficiency,
-    safeSpectralEfficiency_bpsHz: safe.spectralEfficiency,
+    status: best ? 'available' : 'outage',
+    reason: best ? null : 'BELOW_MINIMUM_HEURISTIC_SNR',
+    inputMetric: 'SNR',
+    modelStatus: 'heuristic-not-standard-compliant',
+    predicted: best?.modcod ?? null,
+    safeRecommendation: safe?.modcod ?? null,
+    spectralEfficiency_bpsHz: best?.spectralEfficiency ?? null,
+    safeSpectralEfficiency_bpsHz: safe?.spectralEfficiency ?? null,
     margin_dB: marginDb,
     snr_dB: snrDb
   };

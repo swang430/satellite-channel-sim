@@ -46,7 +46,7 @@ const NTN_CHANNEL_TYPES = {
 };
 
 // ─── CDL model types for NTN (TR 38.811 Annex A) ───────────────────────
-function classifyNTNChannel(delaySpread_ns, kFactor_dB, elevation_deg) {
+function classifyNTNChannel(delaySpread_ns, kFactor_dB) {
   if (delaySpread_ns < 10) return 'NTN-TDL-A';
   if (delaySpread_ns < 100 && kFactor_dB > 5) return 'NTN-TDL-B';
   if (delaySpread_ns < 200) return 'NTN-TDL-C';
@@ -63,14 +63,17 @@ function classifyNTNChannel(delaySpread_ns, kFactor_dB, elevation_deg) {
  * @returns {Object} 3GPP NTN-compliant channel parameters
  */
 export function linkStateToNTNParams(linkState) {
-  const delaySpread = linkState.channel?.rmsDelaySpread_ns || 0;
+  const delaySpread = linkState.channel?.rmsDelaySpread_ns ?? 0;
   const kFactor = computeNTNKFactor(linkState);
   const channelType = classifyNTNChannel(delaySpread, kFactor, linkState.elevation_deg);
   
   return {
+    modelStatus: 'heuristic-not-standard-compliant',
     // ── TR 38.811 Section 6.1: Large-scale parameters ──
     largeScaleParams: {
-      pathLoss_dB: -(linkState.rxPower_dBm - 60 - 42),  // approximate
+      pathLoss: Number.isFinite(linkState.pathLoss_dB)
+        ? { status: 'available', value_dB: linkState.pathLoss_dB }
+        : { status: 'unavailable', reason: 'PATH_LOSS_NOT_PROVIDED' },
       shadowFadingStd_dB: 4.0,  // LEO typical
       kFactor_dB: kFactor,
       delaySpread_ns: delaySpread,
@@ -106,7 +109,7 @@ export function linkStateToNTNParams(linkState) {
     
     // ── Link adaptation hints ──
     linkAdaptation: {
-      snr_dB: linkState.snr?.db || -30,
+      snr_dB: linkState.snr?.db ?? null,
       recommendedRank: linkState.channel?.predictedRank || 1,
       mimoCapacity_bpsHz: linkState.channel?.capacityRank2_bpsHz || 0,
       elevation_deg: linkState.elevation_deg,
@@ -145,9 +148,11 @@ export function passToNTNProfile(prediction) {
     ? (dopplers[dopplers.length-1] - dopplers[0]) / (states.length * (prediction.stepSec || 1))
     : 0;
   
-  const snrs = states.filter(s => s.elevation_deg > 0).map(s => s.snr?.db || -30);
+  const snrs = states.filter(s => s.elevation_deg > 0).map(s => s.snr?.db ?? -30);
+  const pathLosses = states.map((state) => state.pathLoss_dB).filter(Number.isFinite);
   
   return {
+    modelStatus: 'heuristic-not-standard-compliant',
     // ── Pass metadata ──
     pass: prediction.pass,
     
@@ -186,7 +191,9 @@ export function passToNTNProfile(prediction) {
         dopplerShiftRange_Hz: [-(maxDoppler), maxDoppler].map(v => +v.toFixed(1)),
         dopplerRateRange_HzPerSec: [-(Math.abs(dopplerRate)), Math.abs(dopplerRate)].map(v => +v.toFixed(3)),
         elevationRange_deg: [+prediction.pass.maxElevation > 90 ? 0 : Math.min(...states.map(s => s.elevation_deg)), +(prediction.pass.maxElevation || 90)].map(v => +v.toFixed(1)),
-        pathLossRange_dB: snrs.length ? [-(Math.min(...snrs)), -(Math.max(...snrs))].map(v => +v.toFixed(1)) : [0, 0],
+        pathLossRange: pathLosses.length === states.length
+          ? { status: 'available', values_dB: [Math.min(...pathLosses), Math.max(...pathLosses)].map(v => +v.toFixed(1)) }
+          : { status: 'unavailable', reason: 'PATH_LOSS_NOT_PROVIDED' },
         xpdRange_dB: [Math.min(...states.map(s => s.channel?.xpd_dB || 35)), Math.max(...states.map(s => s.channel?.xpd_dB || 35))].map(v => +v.toFixed(1))
       }
     },

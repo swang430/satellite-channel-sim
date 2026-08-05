@@ -55,39 +55,32 @@ const DEFAULT_MARGINS = {
  * @returns {Object} MODCOD recommendation
  */
 export function selectMODCOD(esn0Db, marginMode = 'predictive') {
-  const margin = DEFAULT_MARGINS[marginMode] || DEFAULT_MARGINS.predictive;
+  if (!Number.isFinite(esn0Db)) throw new TypeError('Es/N0 must be finite');
+  const margin = DEFAULT_MARGINS[marginMode] ?? DEFAULT_MARGINS.predictive;
   const safeEsN0 = esn0Db - margin;
-  
-  let best = DVB_S2X_TABLE[0];
-  let safe = DVB_S2X_TABLE[0];
-  
-  for (const entry of DVB_S2X_TABLE) {
-    if (esn0Db >= entry.minEsN0 && entry.minEsN0 >= best.minEsN0) {
-      best = entry;
-    }
-    if (safeEsN0 >= entry.minEsN0 && entry.minEsN0 >= safe.minEsN0) {
-      safe = entry;
-    }
-  }
-  
+  const select = (value) => DVB_S2X_TABLE
+    .filter((entry) => value >= entry.minEsN0)
+    .reduce((best, entry) => (!best || entry.minEsN0 >= best.minEsN0 ? entry : best), null);
+  const best = select(esn0Db);
+  const safe = select(safeEsN0);
+  const format = (entry) => entry ? {
+    status: 'available',
+    id: entry.modcodId,
+    name: entry.name,
+    modulation: entry.modulation,
+    codeRate: entry.codeRate,
+    spectralEfficiency_bpsHz: entry.spectralEfficiency,
+    requiredEsN0_dB: entry.minEsN0,
+  } : { status: 'outage', reason: 'BELOW_MINIMUM_ESN0' };
+
   return {
     timestamp: new Date().toISOString(),
-    predictedMODCOD: {
-      id: best.modcodId,
-      name: best.name,
-      modulation: best.modulation,
-      codeRate: best.codeRate,
-      spectralEfficiency_bpsHz: best.spectralEfficiency,
-      requiredEsN0_dB: best.minEsN0
-    },
-    safeRecommendation: {
-      id: safe.modcodId,
-      name: safe.name,
-      modulation: safe.modulation,
-      codeRate: safe.codeRate,
-      spectralEfficiency_bpsHz: safe.spectralEfficiency,
-      requiredEsN0_dB: safe.minEsN0
-    },
+    inputMetric: 'Es/N0',
+    modelStatus: 'table-based-threshold-selection',
+    predictedMODCOD: format(best),
+    safeRecommendation: format(safe),
+    spectralEfficiency_bpsHz: best?.spectralEfficiency ?? null,
+    safeSpectralEfficiency_bpsHz: safe?.spectralEfficiency ?? null,
     linkBudget: {
       predictedEsN0_dB: +esn0Db.toFixed(2),
       safeEsN0_dB: +safeEsN0.toFixed(2),
@@ -112,23 +105,36 @@ export function generateMODCOTimeline(linkStates, marginMode = 'predictive', min
   let lastSwitchTime = null;
   
   for (const state of linkStates) {
-    const modcod = selectMODCOD(state.snr.db, marginMode);
+    if (!Number.isFinite(state.esn0?.db)) {
+      schedule.push({
+        time: state.time,
+        elevation_deg: state.elevation_deg,
+        status: 'unavailable',
+        reason: 'ESN0_NOT_PROVIDED',
+      });
+      continue;
+    }
+    const modcod = selectMODCOD(state.esn0.db, marginMode);
     const currentTime = new Date(state.time);
     
     // Apply hysteresis: only switch if enough time has passed and MODCOD changed
     const canSwitch = !lastSwitchTime || 
       (currentTime - lastSwitchTime) >= minSwitchIntervalSec * 1000;
     
-    if (canSwitch && modcod.safeRecommendation.id !== lastModcod) {
+    const nextModcod = modcod.safeRecommendation.status === 'available'
+      ? modcod.safeRecommendation.id
+      : 'outage';
+    if (canSwitch && nextModcod !== lastModcod) {
       schedule.push({
         time: state.time,
         elevation_deg: state.elevation_deg,
-        snr_dB: state.snr.db,
-        modcodId: modcod.safeRecommendation.id,
-        modcodName: modcod.safeRecommendation.name,
-        spectralEfficiency_bpsHz: modcod.safeRecommendation.spectralEfficiency_bpsHz
+        esn0_dB: state.esn0.db,
+        status: modcod.safeRecommendation.status,
+        modcodId: modcod.safeRecommendation.id ?? null,
+        modcodName: modcod.safeRecommendation.name ?? null,
+        spectralEfficiency_bpsHz: modcod.safeRecommendation.spectralEfficiency_bpsHz ?? null,
       });
-      lastModcod = modcod.safeRecommendation.id;
+      lastModcod = nextModcod;
       lastSwitchTime = currentTime;
     }
   }

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { summarizeModcodTimeline } from './apiDashboardModel.js';
 
 /**
  * ApiDashboard — Lightweight API management panel for Link State Prediction API.
@@ -102,9 +103,12 @@ export default function ApiDashboard() {
   }, [apiUrl]);
 
   useEffect(() => {
-    checkHealth();
+    const initial = setTimeout(checkHealth, 0);
     const interval = setInterval(checkHealth, 10000);
-    return () => clearInterval(interval);
+    return () => {
+      clearTimeout(initial);
+      clearInterval(interval);
+    };
   }, [checkHealth]);
 
   // ─── Save API URL ────────────────────────────────────────────
@@ -263,13 +267,20 @@ export default function ApiDashboard() {
     }
     
     if (endpoint === 'predict-mods' && lastResponse.modcodTimeline) {
-      const best = lastResponse.modcodTimeline.reduce((a, b) => 
-        a.spectralEfficiency_bpsHz > b.spectralEfficiency_bpsHz ? a : b
-      );
+      const summary = summarizeModcodTimeline(lastResponse.modcodTimeline);
+      if (summary.status === 'empty') {
+        return (
+          <div style={{ padding: '10px', background: 'rgba(0,0,0,0.3)', borderRadius: '4px', color: '#ffaa00' }}>
+            无可用 MODCOD 样本：当前窗口无链路，或所有样本均处于 outage。
+          </div>
+        );
+      }
+      const best = summary.best;
       return (
         <div style={{ padding: '10px', background: 'rgba(0,0,0,0.3)', borderRadius: '4px' }}>
           <div style={{ fontSize: '13px', marginBottom: '8px', color: '#00ff88' }}>
             ✓ {lastResponse.totalSamples} MODCOD samples
+            {best.modelStatus === 'heuristic-not-standard-compliant' && ' · SNR 启发式（非标准合规）'}
           </div>
           <div style={{ fontSize: '12px', marginBottom: '8px' }}>
             Best: <span style={{ color: '#00ff88' }}>{best.predicted}</span>
