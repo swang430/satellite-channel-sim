@@ -84,6 +84,24 @@ function validateRtPathStatisticsView(view) {
   }
 }
 
+function unavailableRtPathStatistics(reason, rawChannelTypes) {
+  return {
+    status: 'unavailable',
+    reason,
+    meanAoa_deg: null,
+    meanAod_deg: null,
+    meanDoppler_Hz: null,
+    dopplerCentroid_Hz: null,
+    dopplerRmsSpread_Hz: null,
+    dominantPathDoppler_Hz: null,
+    dominantPathPowerShare: null,
+    dopplerMin_Hz: null,
+    dopplerMax_Hz: null,
+    dopplerMethod: 'noncoherent-path-power-weighted',
+    rawChannelTypes,
+  };
+}
+
 export function summarizeRtPathStatistics(view) {
   validateRtPathStatisticsView(view);
   const weights = [...view.hReal].map((real, index) => (
@@ -92,22 +110,11 @@ export function summarizeRtPathStatistics(view) {
   const totalPower = weights.reduce((sum, value) => sum + value, 0);
   const rawChannelTypes = [...new Set(view.channelType)]
     .sort((left, right) => left - right);
+  if (!Number.isFinite(totalPower) || weights.some((weight) => !Number.isFinite(weight))) {
+    return unavailableRtPathStatistics('NON_FINITE_PATH_POWER', rawChannelTypes);
+  }
   if (totalPower === 0) {
-    return {
-      status: 'unavailable',
-      reason: 'ZERO_TOTAL_PATH_POWER',
-      meanAoa_deg: null,
-      meanAod_deg: null,
-      meanDoppler_Hz: null,
-      dopplerCentroid_Hz: null,
-      dopplerRmsSpread_Hz: null,
-      dominantPathDoppler_Hz: null,
-      dominantPathPowerShare: null,
-      dopplerMin_Hz: null,
-      dopplerMax_Hz: null,
-      dopplerMethod: 'noncoherent-path-power-weighted',
-      rawChannelTypes,
-    };
+    return unavailableRtPathStatistics('ZERO_TOTAL_PATH_POWER', rawChannelTypes);
   }
   const dopplers = [...view.doppler_Hz];
   const dopplerCentroid_Hz = dopplers.reduce((sum, value, index) => (
@@ -123,7 +130,7 @@ export function summarizeRtPathStatistics(view) {
     dopplerMin_Hz: Math.min(range.dopplerMin_Hz, value),
     dopplerMax_Hz: Math.max(range.dopplerMax_Hz, value),
   }), { dopplerMin_Hz: dopplers[0], dopplerMax_Hz: dopplers[0] });
-  return {
+  const statistics = {
     status: 'available',
     meanAoa_deg: circularMean_deg([...view.aoa_deg], weights),
     meanAod_deg: circularMean_deg([...view.aod_deg], weights),
@@ -137,25 +144,55 @@ export function summarizeRtPathStatistics(view) {
     dopplerMethod: 'noncoherent-path-power-weighted',
     rawChannelTypes,
   };
+  const derivedNumbers = Object.values(statistics)
+    .filter((value) => typeof value === 'number');
+  return derivedNumbers.every(Number.isFinite)
+    ? statistics
+    : unavailableRtPathStatistics('NON_FINITE_DERIVED_STATISTICS', rawChannelTypes);
 }
 
-export function summarizeRtWindowRelativeGain(totalPowers_linear) {
-  if (!Array.isArray(totalPowers_linear) || totalPowers_linear.length === 0) {
+function validatedRtFrameTotalPower(frame) {
+  if (frame?.pdp?.aggregation !== 'coherent-complex-sum'
+    || !Array.isArray(frame.pdp.bins)
+    || frame.pdp.bins.length === 0
+    || frame?.metrics?.powerDefinition !== 'coherentPower_linear') {
     throw new DomainValidationError(
-      'RT_WINDOW_POWER_EMPTY',
-      'At least one RT frame total power is required',
+      'RT_WINDOW_FRAME_INVALID',
+      'Every RT frame requires a coherently aggregated PDP and coherent power metrics',
     );
   }
-  if (totalPowers_linear.some((power) => !Number.isFinite(power) || power < 0)) {
+  const verifiedMetrics = calculateChannelMetrics(frame.pdp);
+  if (!Object.is(frame.metrics.totalPower_linear, verifiedMetrics.totalPower_linear)) {
     throw new DomainValidationError(
-      'RT_WINDOW_POWER_INVALID',
-      'RT frame total powers must be finite and non-negative',
+      'RT_WINDOW_METRICS_MISMATCH',
+      'RT frame metrics must match its coherent PDP total power',
     );
   }
+  return verifiedMetrics.totalPower_linear;
+}
 
-  const windowPeakPower = Math.max(...totalPowers_linear);
-  const firstFramePower = totalPowers_linear[0];
+export function summarizeRtWindowRelativeGain(frames) {
+  if (!Array.isArray(frames) || frames.length === 0) {
+    throw new DomainValidationError(
+      'RT_WINDOW_FRAMES_EMPTY',
+      'At least one RT PDP frame is required',
+    );
+  }
+  const totalPowers_linear = frames.map(validatedRtFrameTotalPower);
+  const validPowers = totalPowers_linear.filter((power) => (
+    Number.isFinite(power) && power > 0
+  ));
+  const windowPeakPower = validPowers.reduce((peak, power) => Math.max(peak, power), 0);
+  const firstValidFramePower = validPowers[0] ?? null;
+
   return totalPowers_linear.map((totalPower_linear) => {
+    if (!Number.isFinite(totalPower_linear) || totalPower_linear < 0) {
+      return {
+        status: 'unavailable',
+        reason: 'INVALID_TOTAL_POWER',
+        totalPower_linear: null,
+      };
+    }
     if (totalPower_linear === 0) {
       return {
         status: 'unavailable',
@@ -163,21 +200,13 @@ export function summarizeRtWindowRelativeGain(totalPowers_linear) {
         totalPower_linear,
       };
     }
-    const relativeToWindowPeak_dB = 10 * Math.log10(totalPower_linear / windowPeakPower);
-    if (firstFramePower === 0) {
-      return {
-        status: 'unavailable',
-        reason: 'ZERO_FIRST_FRAME_POWER',
-        totalPower_linear,
-        relativeToWindowPeak_dB,
-        relativeToFirstFrame_dB: null,
-      };
-    }
     return {
       status: 'available',
       totalPower_linear,
-      relativeToWindowPeak_dB,
-      relativeToFirstFrame_dB: 10 * Math.log10(totalPower_linear / firstFramePower),
+      relativeToWindowPeak_dB:
+        10 * (Math.log10(totalPower_linear) - Math.log10(windowPeakPower)),
+      relativeToFirstFrame_dB:
+        10 * (Math.log10(totalPower_linear) - Math.log10(firstValidFramePower)),
     };
   });
 }
