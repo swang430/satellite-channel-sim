@@ -1,5 +1,6 @@
 import { DomainValidationError } from '../../domain/validation.js';
 import { receiverMotionAt } from '../mpdb-import/receiverTrack.js';
+import { buildPlaybackAnalytics } from './playbackAnalytics.js';
 
 const PLOT_FLOOR_DB = -120;
 const UNDEFINED_H_NORMALIZATION = 'UNDEFINED_H_NORMALIZATION';
@@ -309,7 +310,16 @@ export function buildComparisonPlaybackFrames(report, { showRtOverlay = true } =
   if (typeof showRtOverlay !== 'boolean') {
     invalidComparisonData('showRtOverlay must be boolean');
   }
+  for (let position = 0; position < report.frames.length; position += 1) {
+    if (!(position in report.frames)
+      || report.frames[position] === null
+      || typeof report.frames[position] !== 'object'
+      || Array.isArray(report.frames[position])) {
+      invalidComparisonData(`frames[${position}] must be an object`);
+    }
+  }
   const playbackFrames = [];
+  const analytics = buildPlaybackAnalytics(report);
   for (let position = 0; position < report.frames.length; position += 1) {
     if (!(position in report.frames)) {
       invalidComparisonData(`frames[${position}] must be an object`);
@@ -326,6 +336,7 @@ export function buildComparisonPlaybackFrames(report, { showRtOverlay = true } =
       frameView,
       chartData: buildComparisonChartData(frameView),
       summary: buildComparisonPlaybackSummary(report, position),
+      analytics: analytics.frames[position],
     });
   }
   return playbackFrames;
