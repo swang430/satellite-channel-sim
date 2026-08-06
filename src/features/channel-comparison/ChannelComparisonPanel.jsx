@@ -23,6 +23,7 @@ export default function ChannelComparisonPanel({
   scenario,
   requestKey,
   statisticalParameters,
+  linkBudgetParameters,
   parameterError,
   onReportChange,
   autoRun = false,
@@ -47,7 +48,7 @@ export default function ChannelComparisonPanel({
       abortRef.current?.abort();
       abortRef.current = null;
     };
-  }, [requestKey, scenario, statisticalParameters]);
+  }, [linkBudgetParameters, requestKey, scenario, statisticalParameters]);
 
   function cancelComparison() {
     if (!abortRef.current) return;
@@ -75,6 +76,7 @@ export default function ChannelComparisonPanel({
       const engineReport = await compareScenario(scenario, {
         realizationCount: COMPARISON_REALIZATION_COUNT,
         statisticalParameters,
+        linkBudgetParameters,
         signal: controller.signal,
         onProgress: (nextProgress) => {
           if (runVersionRef.current === runVersion && !controller.signal.aborted) {
@@ -99,7 +101,7 @@ export default function ChannelComparisonPanel({
         abortRef.current = null;
       }
     }
-  }, [preservePreviousReport, requestKey, scenario, statisticalParameters]);
+  }, [linkBudgetParameters, preservePreviousReport, requestKey, scenario, statisticalParameters]);
 
   useEffect(() => {
     if (!autoRun || !scenarioCanRun(scenario, requestKey, parameterError)) return;

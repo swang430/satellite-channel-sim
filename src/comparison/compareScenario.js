@@ -1,8 +1,13 @@
 import { assertScenarioReadyForComparison } from '../domain/scenario.js';
 import { DomainValidationError } from '../domain/validation.js';
 import { scenarioFrameGeometry } from '../geometry/scenarioGeometry.js';
-import { comparePdpMetrics, summarizeRtPathStatistics } from './comparisonMetrics.js';
+import {
+  comparePdpMetrics,
+  summarizeRtPathStatistics,
+  summarizeRtWindowRelativeGain,
+} from './comparisonMetrics.js';
 import { rtFrameToPdp } from './rtChannelAdapter.js';
+import { buildStatisticalFrameAnalytics } from './statisticalFrameAnalytics.js';
 import {
   normalizeStatisticalEnsembleParameters,
   runStatisticalEnsemble,
@@ -39,6 +44,7 @@ async function yieldToHost() {
 export async function compareScenario(scenario, {
   realizationCount = 32,
   statisticalParameters = {},
+  linkBudgetParameters = {},
   signal,
   onProgress,
 } = {}) {
@@ -68,6 +74,16 @@ export async function compareScenario(scenario, {
       ...normalizedStatisticalParameters,
       realizationCount: normalizedEnsembleParameters.realizationCount,
     });
+    statistical.linkBudget = buildStatisticalFrameAnalytics({
+      carrier: scenario.carrier,
+      geometry,
+      linkParameters: {
+        ...linkBudgetParameters,
+        env: normalizedStatisticalParameters.environment,
+        tec: normalizedStatisticalParameters.tec_TECU,
+      },
+      statisticalResult: statistical,
+    });
     frames.push({
       frameId,
       timestampUtc: geometry.timestampUtc,
@@ -90,6 +106,29 @@ export async function compareScenario(scenario, {
     await yieldToHost();
     throwIfComparisonAborted(signal);
   }
+  const relativeGains = summarizeRtWindowRelativeGain(frames.map((frame) => frame.rt));
+  const carrierScale = scenario.carrier.frequency_Hz / 299_792_458;
+  frames.forEach((frame, index) => {
+    const leftIndex = index === 0 ? 0 : index - 1;
+    const rightIndex = index === frames.length - 1 ? index : index + 1;
+    const elapsed_s = (Date.parse(frames[rightIndex].timestampUtc)
+      - Date.parse(frames[leftIndex].timestampUtc)) / 1_000;
+    const rangeDelta_m = frames[rightIndex].geometry.slantRange_m
+      - frames[leftIndex].geometry.slantRange_m;
+    const radialVelocity_mps = elapsed_s > 0 ? rangeDelta_m / elapsed_s : 0;
+    frame.statistical.doppler = {
+      geometric_Hz: -carrierScale * radialVelocity_mps,
+      radialVelocity_mps,
+      method: 'mpdb-range-finite-difference',
+    };
+    frame.rt.relativeGain = {
+      ...relativeGains[index],
+      absolutePathLoss: {
+        status: 'unavailable',
+        reason: 'UNDEFINED_H_NORMALIZATION',
+      },
+    };
+  });
   return {
     scenarioId: scenario.scenarioId,
     modelVersion: COMPARISON_MODEL_VERSION,
@@ -102,6 +141,7 @@ export async function compareScenario(scenario, {
       frameCount: scenario.time.frameCount,
     },
     statisticalParameters: normalizedStatisticalParameters,
+    linkBudgetParameters: { ...linkBudgetParameters },
     timeWindow: {
       source: 'mpdb',
       startTimeUtc: frames[0].timestampUtc,
@@ -115,7 +155,7 @@ export async function compareScenario(scenario, {
     },
     frames,
     diagnostics: [{
-      code: 'RT_ABSOLUTE_POWER_UNAVAILABLE',
+      code: 'RT_ABSOLUTE_PATH_LOSS_UNAVAILABLE',
       severity: 'warning',
       reason: 'UNDEFINED_H_NORMALIZATION',
     }],

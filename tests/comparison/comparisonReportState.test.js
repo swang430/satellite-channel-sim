@@ -15,6 +15,15 @@ function comparisonRequest(overrides = {}) {
       tec_TECU: 20,
       scatterPowerOffset_dB: -2,
     },
+    linkBudgetParameters: {
+      eirp: 60,
+      gRx: 42,
+      tRx: 150,
+      rainRate: 5,
+      disableFastFading: true,
+      correctionFactor: 1,
+      gasAttenOffset_dB: 0,
+    },
     ...overrides,
   };
 }
@@ -41,6 +50,7 @@ describe('comparison report request state', () => {
       scenarioId: 'sha256:scenario-a',
       realizationCount: 32,
       statisticalParameters: request.statisticalParameters,
+      linkBudgetParameters: request.linkBudgetParameters,
     }));
   });
 
@@ -139,6 +149,15 @@ describe('comparison report request state', () => {
   it('builds a stable key independent of request and parameter property order', () => {
     const first = comparisonRequest();
     const reordered = {
+      linkBudgetParameters: {
+        gasAttenOffset_dB: 0,
+        correctionFactor: 1,
+        disableFastFading: true,
+        rainRate: 5,
+        tRx: 150,
+        gRx: 42,
+        eirp: 60,
+      },
       statisticalParameters: {
         scatterPowerOffset_dB: -2,
         tec_TECU: 20,
@@ -157,6 +176,13 @@ describe('comparison report request state', () => {
     ['TEC', { statisticalParameters: { environment: 'urban', tec_TECU: 21, scatterPowerOffset_dB: -2 } }],
     ['scatter offset', { statisticalParameters: { environment: 'urban', tec_TECU: 20, scatterPowerOffset_dB: -1 } }],
     ['realization count', { realizationCount: 33 }],
+    ['EIRP', { linkBudgetParameters: { eirp: 61 } }],
+    ['receiver gain', { linkBudgetParameters: { gRx: 43 } }],
+    ['noise temperature', { linkBudgetParameters: { tRx: 151 } }],
+    ['rain rate', { linkBudgetParameters: { rainRate: 6 } }],
+    ['fast fading switch', { linkBudgetParameters: { disableFastFading: false } }],
+    ['rain calibration', { linkBudgetParameters: { correctionFactor: 1.1 } }],
+    ['gas calibration', { linkBudgetParameters: { gasAttenOffset_dB: 0.2 } }],
   ])('changes the key when %s changes', (_label, overrides) => {
     expect(buildComparisonRequestKey(comparisonRequest(overrides)))
       .not.toBe(buildComparisonRequestKey(comparisonRequest()));

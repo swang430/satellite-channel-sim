@@ -116,13 +116,26 @@ export default function ChannelSimPanel({
     const [comparisonReport, setComparisonReport] = useState(null);
     const [showMpdbTools, setShowMpdbTools] = useState(false);
     const timeline = generatedTimeline;
+    const comparisonLinkBudgetParameters = useMemo(() => {
+        const parameters = {
+            eirp, gRx, tRx, rainRate, disableFastFading,
+            isPhasedArray: Boolean(globalParams?.isPhasedArray),
+            hpbw: globalParams?.hpbw ?? 2,
+            xpdAnt: globalParams?.xpdAnt ?? 35,
+            columnarLWC_kgm2: globalParams?.columnarLWC_kgm2 ?? 0.5,
+        };
+        return useCalibration && calibProfile.calibrated
+            ? applyCalibration(parameters, calibProfile)
+            : parameters;
+    }, [calibProfile, disableFastFading, eirp, gRx, globalParams, rainRate, tRx, useCalibration]);
     const comparisonRequest = useMemo(() => deriveComparisonRequest({
         scenarioId: mpdbScenario?.scenarioId,
         environment: env,
         tec_TECU: tec,
         useCalibration,
         calibrationProfile: calibProfile,
-    }), [calibProfile, env, mpdbScenario?.scenarioId, tec, useCalibration]);
+        linkBudgetParameters: comparisonLinkBudgetParameters,
+    }), [calibProfile, comparisonLinkBudgetParameters, env, mpdbScenario?.scenarioId, tec, useCalibration]);
     const comparisonStatisticalParameters = comparisonRequest.statisticalParameters;
     const standaloneStatisticalParameters = useMemo(() => ({
         environment: env === 'open' ? 'rural' : env,
@@ -1112,6 +1125,7 @@ export default function ChannelSimPanel({
                             scenario={mpdbScenario}
                             requestKey={comparisonRequestKey}
                             statisticalParameters={comparisonStatisticalParameters}
+                            linkBudgetParameters={comparisonRequest.linkBudgetParameters}
                             parameterError={comparisonRequest.error}
                             onReportChange={handleComparisonReportChange}
                             autoRun={Boolean(comparisonRequestKey && !activeComparisonReport)}

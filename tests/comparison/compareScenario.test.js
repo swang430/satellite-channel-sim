@@ -87,6 +87,13 @@ describe('scenario comparison report', () => {
     const progress = [];
     const report = await compareScenario(scenarioFixture(), {
       realizationCount: 2,
+      linkBudgetParameters: {
+        eirp: 62,
+        gRx: 41,
+        tRx: 145,
+        rainRate: 8,
+        disableFastFading: true,
+      },
       statisticalParameters: {
         environment: 'urban',
         tec_TECU: 20,
@@ -133,6 +140,36 @@ describe('scenario comparison report', () => {
       },
     });
     expect(report.frames[0].rt.absolutePower.reason).toBe('UNDEFINED_H_NORMALIZATION');
+    expect(report.frames[0]).toMatchObject({
+      statistical: {
+        linkBudget: {
+          loss: { totalPropagationLoss_dB: expect.any(Number) },
+          link: { rxPower_dBm: expect.any(Number), snr_dB: expect.any(Number) },
+        },
+        doppler: {
+          geometric_Hz: expect.any(Number),
+          method: 'mpdb-range-finite-difference',
+        },
+      },
+      rt: {
+        relativeGain: {
+          relativeToWindowPeak_dB: expect.any(Number),
+          relativeToFirstFrame_dB: expect.any(Number),
+          absolutePathLoss: {
+            status: 'unavailable',
+            reason: 'UNDEFINED_H_NORMALIZATION',
+          },
+        },
+      },
+    });
+    const expectedRangeRate = (report.frames[1].geometry.slantRange_m
+      - report.frames[0].geometry.slantRange_m);
+    expect(report.frames[0].statistical.doppler.geometric_Hz).toBeCloseTo(
+      -(25e9 / 299_792_458) * expectedRangeRate,
+      10,
+    );
+    expect(report.frames[0].statistical.linkBudget.link.frequency_Hz).toBe(25e9);
+    expect(report.frames[0].statistical.linkBudget.link.bandwidth_Hz).toBe(100e6);
     expect(report.realizationCount).toBe(2);
     expect(progress).toEqual([0.5, 1]);
     expect(report).toMatchObject({
@@ -142,6 +179,9 @@ describe('scenario comparison report', () => {
     });
     expect(report).not.toHaveProperty('groundSelection');
     expect(report).not.toHaveProperty('approximateFrames');
+    expect(report.diagnostics).toContainEqual(expect.objectContaining({
+      code: 'RT_ABSOLUTE_PATH_LOSS_UNAVAILABLE',
+    }));
   });
 
   it('rejects a scenario whose receiver track is incomplete', async () => {

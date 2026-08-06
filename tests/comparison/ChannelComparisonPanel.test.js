@@ -101,6 +101,7 @@ describe('ChannelComparisonPanel', () => {
         tec_TECU: 20,
         scatterPowerOffset_dB: -2,
       },
+      linkBudgetParameters: { eirp: 61, gRx: 43, rainRate: 7 },
       onReportChange: vi.fn(),
     };
     const nextProps = { ...defaults, ...props };
@@ -110,7 +111,7 @@ describe('ChannelComparisonPanel', () => {
 
   it('runs a receiver-track scenario with the keyed statistical request and only renders controls/summary', async () => {
     compareScenarioMock.mockResolvedValue(reportFixture());
-    const { onReportChange, statisticalParameters } = render();
+    const { onReportChange, statisticalParameters, linkBudgetParameters } = render();
 
     expect(container.textContent).toContain('MPDB 接收机轨迹');
     expect(container.querySelector('input[type="range"]')).toBeNull();
@@ -123,6 +124,7 @@ describe('ChannelComparisonPanel', () => {
     expect(compareScenarioMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       realizationCount: 32,
       statisticalParameters,
+      linkBudgetParameters,
     }));
     expect(onReportChange).toHaveBeenLastCalledWith(expect.objectContaining({
       scenarioId: 'sha256:scenario-a',
