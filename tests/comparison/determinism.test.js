@@ -58,6 +58,14 @@ describe('deterministic statistical ensemble', () => {
     expect(ensemble.summary.median.length).toBeGreaterThan(0);
     expect(ensemble.summary.p5[0]).toBeLessThanOrEqual(ensemble.summary.median[0]);
     expect(ensemble.summary.median[0]).toBeLessThanOrEqual(ensemble.summary.p95[0]);
+    expect(ensemble.metricSummary.rmsDelaySpread_s).toEqual(expect.objectContaining({
+      median: expect.any(Number),
+      p5: expect.any(Number),
+      p95: expect.any(Number),
+    }));
+    expect(ensemble.metricSummary.coherenceBandwidth_Hz).toEqual(expect.objectContaining({
+      median: expect.any(Number),
+    }));
   });
 
   it.each(invalidParameterCases)('rejects %s', (_label, overrides) => {

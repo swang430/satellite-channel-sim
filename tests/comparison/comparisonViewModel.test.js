@@ -55,6 +55,10 @@ function comparisonFrameFixture({
         p5: [0.5, 0.05],
         p95: [1, 0.2],
       },
+      metricSummary: {
+        rmsDelaySpread_s: { median: 8e-9, p5: 7e-9, p95: 9e-9 },
+        coherenceBandwidth_Hz: { median: 25e6, p5: 20e6, p95: 30e6 },
+      },
     },
     metrics: {
       jsDivergence_bits: 0.125,
@@ -161,6 +165,35 @@ describe('comparison PDP view model', () => {
     expect(shown.datasets.every((set) => set.frameId === 8)).toBe(true);
   });
 
+  it('builds a statistical-only playback frame without requiring RT or fit metrics', () => {
+    const frame = comparisonFrameFixture();
+    delete frame.rt;
+    delete frame.metrics;
+    frame.link = { rxPower_dBm: -91.5, snr_dB: 13.25 };
+    const report = {
+      ...comparisonReportFixture(),
+      modelVersion: 'statistical-playback/v1',
+      receiverGeometry: { mode: 'fixed-ground-station', frameCount: 1 },
+      frames: [frame],
+      diagnostics: [],
+    };
+
+    const [playback] = buildComparisonPlaybackFrames(report, { showRtOverlay: true });
+
+    expect(playback.chartData.datasets.map((dataset) => dataset.source)).toEqual([
+      'statistical-median',
+      'statistical-p5',
+      'statistical-p95',
+    ]);
+    expect(playback.summary).toMatchObject({
+      rtAvailable: false,
+      statisticalRmsDelaySpread_s: 8e-9,
+      statisticalCoherenceBandwidth_Hz: 25e6,
+      rxPower_dBm: -91.5,
+      snr_dB: 13.25,
+    });
+  });
+
   it('advances by report position instead of assuming contiguous frame IDs', () => {
     const report = { frames: [{ frameId: 3 }, { frameId: 8 }] };
 
@@ -243,6 +276,11 @@ describe('comparison PDP view model', () => {
       receiverAltitude_m: 50,
       elevation_deg: 89.5,
       slantRange_m: 700_003,
+      statisticalRmsDelaySpread_s: 8e-9,
+      statisticalCoherenceBandwidth_Hz: 25e6,
+      rxPower_dBm: null,
+      snr_dB: null,
+      rtAvailable: true,
       jsDivergence_bits: 0.125,
       rmsDelaySpreadDifference_s: -2e-9,
       weightedDelayDistance_s: 4e-9,

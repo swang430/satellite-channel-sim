@@ -66,6 +66,10 @@ function comparisonFrameFixture({
         p5: [0.5, 0.05],
         p95: [1, 0.2],
       },
+      metricSummary: {
+        rmsDelaySpread_s: { median: 8e-9, p5: 7e-9, p95: 9e-9 },
+        coherenceBandwidth_Hz: { median: 25e6, p5: 20e6, p95: 30e6 },
+      },
     },
     metrics: {
       jsDivergence_bits: 0.125,
@@ -104,6 +108,26 @@ function comparisonReportFixture({ firstFrameId = 3, secondFrameId = 8 } = {}) {
       }),
     ],
   };
+}
+
+function statisticalReportFixture() {
+  const report = comparisonReportFixture();
+  report.modelVersion = 'statistical-playback/v1';
+  report.receiverGeometry = { mode: 'fixed-ground-station', frameCount: 2 };
+  report.timeWindow = {
+    source: 'selected-pass',
+    startTimeUtc: '2026-08-05T00:00:03.000Z',
+    endTimeUtc: '2026-08-05T00:00:08.000Z',
+    sampleInterval_s: 5,
+    frameCount: 2,
+  };
+  report.diagnostics = [];
+  report.frames.forEach((frame, index) => {
+    delete frame.rt;
+    delete frame.metrics;
+    frame.link = { rxPower_dBm: -91 + index, snr_dB: 12 + index };
+  });
+  return report;
 }
 
 function chartSources(container) {
@@ -198,6 +222,24 @@ describe('PdpComparisonPlayer', () => {
     expect(container.textContent).not.toContain('UNDEFINED_H_NORMALIZATION');
   });
 
+  it('presents the selected pass as a first-class statistical PDP playback window', () => {
+    render(statisticalReportFixture());
+
+    expect(container.querySelector('input[aria-label="RT 叠加"]')).toBeNull();
+    expect(chartSources(container)).toEqual([
+      'statistical-median',
+      'statistical-p5',
+      'statistical-p95',
+    ]);
+    expect(container.textContent).toContain('已选过顶窗口');
+    expect(container.textContent).toContain('2026-08-05T00:00:03.000Z');
+    expect(container.textContent).toContain('2 帧');
+    expect(container.textContent).toContain('统计 RMS 时延扩展 8.000 ns');
+    expect(container.textContent).toContain('统计相干带宽 25.000 MHz');
+    expect(container.textContent).toContain('Rx -91.00 dBm');
+    expect(container.textContent).not.toContain('MPDB 接收机轨迹');
+  });
+
   it('advances non-contiguous frame IDs at the default FPS and stays still while paused', () => {
     render(comparisonReportFixture());
     click(container.querySelector('button[aria-label="播放 PDP 对比"]'));
@@ -208,6 +250,25 @@ describe('PdpComparisonPlayer', () => {
     click(container.querySelector('button[aria-label="暂停 PDP 对比播放"]'));
     advance(1_000);
     expect(container.textContent).toContain('MPDB FRAME 8');
+  });
+
+  it('publishes the active playback position for trajectory synchronization', () => {
+    const onPositionChange = vi.fn();
+    render(statisticalReportFixture(), { onPositionChange });
+
+    expect(onPositionChange).toHaveBeenLastCalledWith({
+      position: 0,
+      frameId: 3,
+      timestampUtc: '2026-08-05T00:00:03.000Z',
+    });
+
+    click(container.querySelector('button[aria-label="播放 PDP 对比"]'));
+    advance(500);
+    expect(onPositionChange).toHaveBeenLastCalledWith({
+      position: 1,
+      frameId: 8,
+      timestampUtc: '2026-08-05T00:00:08.000Z',
+    });
   });
 
   it('accepts any integer FPS from 1 through 60 and advances at 37 FPS', () => {
@@ -281,6 +342,24 @@ describe('PdpComparisonPlayer', () => {
     expect(container.querySelector('button[aria-label="播放 PDP 对比"]')).not.toBeNull();
     advance(1_000);
     expect(container.textContent).toContain('MPDB FRAME 21');
+  });
+
+  it('keeps the timestamp position when statistical parameters refresh the same window', () => {
+    const report = statisticalReportFixture();
+    render(report);
+    click(container.querySelector('button[aria-label="播放 PDP 对比"]'));
+    advance(500);
+    expect(container.textContent).toContain('FRAME 8');
+
+    const refreshed = statisticalReportFixture();
+    refreshed.statisticalParameters = { environment: 'urban', tec_TECU: 60 };
+    refreshed.frames[1].statistical.summary.median = [1, 0.2];
+    render(refreshed);
+
+    expect(container.textContent).toContain('FRAME 8');
+    expect(container.querySelector('button[aria-label="播放 PDP 对比"]')).not.toBeNull();
+    advance(1_000);
+    expect(container.textContent).toContain('FRAME 8');
   });
 
   it('cleans the playback interval on unmount without leaking a state update', () => {

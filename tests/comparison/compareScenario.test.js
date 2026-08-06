@@ -97,6 +97,13 @@ describe('scenario comparison report', () => {
 
     expect(report.frames.map((frame) => frame.frameId)).toEqual([0, 1]);
     expect(report.frameCounts).toEqual({ total: 2, compared: 2 });
+    expect(report.timeWindow).toEqual({
+      source: 'mpdb',
+      startTimeUtc: '2026-08-05T00:00:00.000Z',
+      endTimeUtc: '2026-08-05T00:00:01.000Z',
+      sampleInterval_s: 1,
+      frameCount: 2,
+    });
     expect(report.receiverGeometry).toEqual({
       mode: 'mpdb-track',
       source: 'rayTracing.rxPosition',

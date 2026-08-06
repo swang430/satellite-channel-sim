@@ -102,6 +102,13 @@ export async function compareScenario(scenario, {
       frameCount: scenario.time.frameCount,
     },
     statisticalParameters: normalizedStatisticalParameters,
+    timeWindow: {
+      source: 'mpdb',
+      startTimeUtc: frames[0].timestampUtc,
+      endTimeUtc: frames.at(-1).timestampUtc,
+      sampleInterval_s: scenario.time.sampleInterval_s,
+      frameCount: frames.length,
+    },
     frameCounts: {
       total: scenario.time.frameCount,
       compared: frames.length,

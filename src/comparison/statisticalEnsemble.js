@@ -51,6 +51,19 @@ function quantile(sorted, probability) {
   return sorted[lower] * (1 - fraction) + sorted[upper] * fraction;
 }
 
+function summarizeMetric(realizations, metricName) {
+  const values = realizations
+    .map((realization) => realization.metrics?.[metricName])
+    .filter(Number.isFinite)
+    .sort((left, right) => left - right);
+  if (values.length === 0) return null;
+  return {
+    median: quantile(values, 0.5),
+    p5: quantile(values, 0.05),
+    p95: quantile(values, 0.95),
+  };
+}
+
 export function runStatisticalEnsemble({
   scenarioId,
   frameId,
@@ -106,6 +119,10 @@ export function runStatisticalEnsemble({
       median: valuesByBin.map((values) => quantile(values, 0.5)),
       p5: valuesByBin.map((values) => quantile(values, 0.05)),
       p95: valuesByBin.map((values) => quantile(values, 0.95)),
+    },
+    metricSummary: {
+      rmsDelaySpread_s: summarizeMetric(realizations, 'rmsDelaySpread_s'),
+      coherenceBandwidth_Hz: summarizeMetric(realizations, 'coherenceBandwidth_Hz'),
     },
     realizations,
   };

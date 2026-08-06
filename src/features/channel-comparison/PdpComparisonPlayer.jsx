@@ -61,10 +61,23 @@ function fixed(value, digits) {
   return value.toFixed(digits);
 }
 
+function playbackSourceLabel(report) {
+  return report?.timeWindow?.source === 'selected-pass'
+    ? '已选过顶窗口 · 统计模型'
+    : 'MPDB 原生时间窗口 · RT / 统计模型';
+}
+
+function windowSummary(report, frameCount) {
+  const window = report?.timeWindow;
+  if (!window) return null;
+  return `${window.startTimeUtc} → ${window.endTimeUtc} · ${frameCount} 帧 · ${fixed(window.sampleInterval_s, 3)} s/帧`;
+}
+
 export default function PdpComparisonPlayer({
   report,
   rtAvailable = true,
   isRefreshing = false,
+  onPositionChange,
 }) {
   const [position, setPosition] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -75,9 +88,18 @@ export default function PdpComparisonPlayer({
   const [previousReportFrames, setPreviousReportFrames] = useState(reportFrames);
 
   if (report !== previousReport || reportFrames !== previousReportFrames) {
+    const previousPosition = Array.isArray(previousReportFrames) && previousReportFrames.length > 0
+      ? Math.min(Math.max(position, 0), previousReportFrames.length - 1)
+      : 0;
+    const previousTimestamp = previousReportFrames?.[previousPosition]?.timestampUtc;
+    const matchingPosition = report?.scenarioId === previousReport?.scenarioId
+      && typeof previousTimestamp === 'string'
+      && Array.isArray(reportFrames)
+      ? reportFrames.findIndex((frame) => frame?.timestampUtc === previousTimestamp)
+      : -1;
     setPreviousReport(report);
     setPreviousReportFrames(reportFrames);
-    setPosition(0);
+    setPosition(matchingPosition >= 0 ? matchingPosition : 0);
     setIsPlaying(false);
   }
 
@@ -103,12 +125,23 @@ export default function PdpComparisonPlayer({
   }, [report, reportFrames, rtAvailable, showRtOverlay]);
 
   const frameCount = precomputedPlayback.ok ? precomputedPlayback.frames.length : 0;
+  const reportHasRt = precomputedPlayback.ok
+    && precomputedPlayback.frames.some((frame) => frame.summary.rtAvailable);
   const activePosition = frameCount > 0
     ? Math.min(Math.max(position, 0), frameCount - 1)
     : 0;
   const activeFrame = precomputedPlayback.ok
     ? precomputedPlayback.frames[activePosition]
     : null;
+
+  useEffect(() => {
+    if (!activeFrame) return;
+    onPositionChange?.({
+      position: activePosition,
+      frameId: activeFrame.frameId,
+      timestampUtc: activeFrame.summary.timestampUtc,
+    });
+  }, [activeFrame, activePosition, onPositionChange]);
 
   useEffect(() => {
     if (!isPlaying || !precomputedPlayback.ok || frameCount <= 1) return undefined;
@@ -146,19 +179,26 @@ export default function PdpComparisonPlayer({
             CIR- Power Delay Profile
           </strong>
           <div style={{ marginTop: '4px', color: '#9bb8b4', fontSize: '0.76em' }}>
-            MPDB 接收机轨迹逐帧 RT / 统计模型对比
+            {playbackSourceLabel(report)}
           </div>
+          {windowSummary(report, frameCount) && (
+            <div style={{ marginTop: '3px', color: '#789b96', fontSize: '0.72em', fontFamily: 'monospace' }}>
+              {windowSummary(report, frameCount)}
+            </div>
+          )}
         </div>
-        <label style={{ display: 'flex', gap: '6px', alignItems: 'center', color: '#ff9b96' }}>
-          <input
-            type="checkbox"
-            aria-label="RT 叠加"
-            checked={rtAvailable && showRtOverlay}
-            disabled={!rtAvailable}
-            onChange={(event) => setShowRtOverlay(event.target.checked)}
-          />
-          RT 叠加
-        </label>
+        {reportHasRt && (
+          <label style={{ display: 'flex', gap: '6px', alignItems: 'center', color: '#ff9b96' }}>
+            <input
+              type="checkbox"
+              aria-label="RT 叠加"
+              checked={rtAvailable && showRtOverlay}
+              disabled={!rtAvailable}
+              onChange={(event) => setShowRtOverlay(event.target.checked)}
+            />
+            RT 叠加
+          </label>
+        )}
       </div>
 
       <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', margin: '12px 0 8px' }}>
@@ -191,7 +231,7 @@ export default function PdpComparisonPlayer({
           {' '}FPS
         </label>
         <span style={{ marginLeft: 'auto', fontFamily: 'monospace', fontSize: '0.82em' }}>
-          位置 {activePosition + 1} / {frameCount} · MPDB FRAME {summary.frameId}
+          位置 {activePosition + 1} / {frameCount} · {reportHasRt ? 'MPDB ' : ''}FRAME {summary.frameId}
         </span>
       </div>
 
@@ -225,7 +265,23 @@ export default function PdpComparisonPlayer({
         </span>
         <span style={metricStyle}>仰角 {fixed(summary.elevation_deg, 3)}°</span>
         <span style={metricStyle}>斜距 {fixed(summary.slantRange_m / 1e3, 3)} km</span>
-        {rtAvailable && (
+        {Number.isFinite(summary.statisticalRmsDelaySpread_s) && (
+          <span style={metricStyle}>
+            统计 RMS 时延扩展 {fixed(summary.statisticalRmsDelaySpread_s * 1e9, 3)} ns
+          </span>
+        )}
+        {Number.isFinite(summary.statisticalCoherenceBandwidth_Hz) && (
+          <span style={metricStyle}>
+            统计相干带宽 {fixed(summary.statisticalCoherenceBandwidth_Hz / 1e6, 3)} MHz
+          </span>
+        )}
+        {Number.isFinite(summary.rxPower_dBm) && (
+          <span style={metricStyle}>Rx {fixed(summary.rxPower_dBm, 2)} dBm</span>
+        )}
+        {Number.isFinite(summary.snr_dB) && (
+          <span style={metricStyle}>SNR {fixed(summary.snr_dB, 2)} dB</span>
+        )}
+        {rtAvailable && summary.rtAvailable && (
           <>
             <span style={metricStyle}>JS divergence {fixed(summary.jsDivergence_bits, 5)} bit</span>
             <span style={metricStyle}>
@@ -238,7 +294,7 @@ export default function PdpComparisonPlayer({
         )}
       </div>
 
-      {rtAvailable ? (
+      {rtAvailable && summary.rtAvailable ? (
         <div role="note" style={{ color: '#ffc890', fontSize: '0.76em', marginBottom: '8px' }}>
           {summary.rtNormalizationStatus}：RT 绝对 H / 功率归一化定义缺失；图中 RT 与统计 PDP 各自按峰值归一化，仅比较动态形状与时延结构。
         </div>

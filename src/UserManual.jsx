@@ -183,10 +183,10 @@ export default function UserManual({ onClose }) {
                     <h3 style={h3Style}>使用流程</h3>
                     <ol style={{ paddingLeft: '20px', fontSize: '0.9em' }}>
                         <li><strong>设置地面站坐标和链路参数</strong>（频率、EIRP、增益等）</li>
-                        <li>点击 <span style={codeStyle}>🔍 Search Passes</span> 搜索可用过境</li>
-                        <li>从列表中选择一个 Pass 时段</li>
-                        <li>点击 <span style={codeStyle}>🚀 Generate Channel TimeSeries</span> 生成</li>
-                        <li>查看图表：Total Loss、SNR、Elevation、CIR/PDP 等</li>
+                        <li>系统会自动搜索并列出未来 24 小时的多个过顶窗口，但不会自动选中</li>
+                        <li>从列表中明确选择一个 Pass 时段</li>
+                        <li>选中后自动生成该窗口的 32-realization 统计 PDP 时间序列；<span style={codeStyle}>🚀 Recompute Selected Window</span> 可手动重算</li>
+                        <li>在统一 PDP 播放器中查看 median、P5/P95、RMS 时延扩展、相干带宽、Rx、SNR、仰角和斜距随时间变化</li>
                     </ol>
 
                     <h3 style={h3Style}>CIR（信道脉冲响应）</h3>
@@ -472,6 +472,8 @@ export default function UserManual({ onClose }) {
 
                     <h3 style={h3Style}>比较机制</h3>
                     <ol style={{ paddingLeft: '20px', fontSize: '0.9em' }}>
+                        <li>统计 PDP 始终是统一播放器的基础层；无 MPDB 时播放用户选定的过顶窗口。</li>
+                        <li>导入 MPDB 后，播放窗口切换为 MPDB 原生起止 UTC、采样间隔和 frame 序列；RT 以 PDP 图层叠加。</li>
                         <li>全程跟随 MPDB 原生接收机轨迹：同一 frame 使用同帧 TX、RX、RT 射线和统计几何；移动段按移动位置、静止段按静止位置播放。</li>
                         <li>系统按配置内容与实体身份、scenarioId、frameId 和 frameOffsets 关联；配置身份错配会被拒绝，文件名不参与关联。</li>
                         <li>需要固定点比较时，请在 Lauraycs 中生成固定终端 MPDB 后导入；UI 不会冻结某一 frame 代替整段 RX 轨迹。</li>

@@ -173,10 +173,9 @@ function normalizationStatus(report, frame) {
 }
 
 export function buildComparisonPlotData(frame) {
-  return {
-    rt: rtSeries(frame),
-    ...statisticalSeries(frame),
-  };
+  const plot = statisticalSeries(frame);
+  if (frame?.rt !== undefined) plot.rt = rtSeries(frame);
+  return plot;
 }
 
 export function buildComparisonFrameView(frame, { showRtOverlay = true } = {}) {
@@ -204,7 +203,7 @@ export function buildComparisonFrameView(frame, { showRtOverlay = true } = {}) {
       data: plot.statisticalP95,
     },
   ];
-  if (showRtOverlay) {
+  if (showRtOverlay && plot.rt) {
     datasets.push({ source: 'rt', frameId: frame.frameId, data: plot.rt });
   }
   return { frameId: frame.frameId, datasets };
@@ -250,7 +249,9 @@ export function buildComparisonPlaybackSummary(report, position) {
   const receiver = frame.receiver;
   projectedPosition(frame, 'receiver position');
   const motion = receiverMotion(report, position);
-  const rtNormalizationStatus = normalizationStatus(report, frame);
+  const rtAvailable = frame.rt !== undefined;
+  const rmsDelaySpread = frame.statistical?.metricSummary?.rmsDelaySpread_s?.median;
+  const coherenceBandwidth = frame.statistical?.metricSummary?.coherenceBandwidth_Hz?.median;
 
   return {
     frameId: frame.frameId,
@@ -262,19 +263,36 @@ export function buildComparisonPlaybackSummary(report, position) {
     receiverAltitude_m: requireFinite(receiver?.altitude_m, 'receiver.altitude_m'),
     elevation_deg: requireFinite(frame.geometry?.elevation_deg, 'geometry.elevation_deg'),
     slantRange_m: requireFinite(frame.geometry?.slantRange_m, 'geometry.slantRange_m'),
-    jsDivergence_bits: requireFinite(
-      frame.metrics?.jsDivergence_bits,
-      'metrics.jsDivergence_bits',
-    ),
-    rmsDelaySpreadDifference_s: requireFinite(
-      frame.metrics?.rmsDelaySpreadDifference_s,
-      'metrics.rmsDelaySpreadDifference_s',
-    ),
-    weightedDelayDistance_s: requireFinite(
-      frame.metrics?.weightedDelayDistance_s,
-      'metrics.weightedDelayDistance_s',
-    ),
-    rtNormalizationStatus,
+    statisticalRmsDelaySpread_s: rmsDelaySpread === undefined || rmsDelaySpread === null
+      ? null
+      : requireFinite(rmsDelaySpread, 'statistical.metricSummary.rmsDelaySpread_s.median'),
+    statisticalCoherenceBandwidth_Hz:
+      coherenceBandwidth === undefined || coherenceBandwidth === null
+        ? null
+        : requireFinite(
+          coherenceBandwidth,
+          'statistical.metricSummary.coherenceBandwidth_Hz.median',
+        ),
+    rxPower_dBm: frame.link?.rxPower_dBm === undefined
+      ? null
+      : requireFinite(frame.link.rxPower_dBm, 'link.rxPower_dBm'),
+    snr_dB: frame.link?.snr_dB === undefined
+      ? null
+      : requireFinite(frame.link.snr_dB, 'link.snr_dB'),
+    rtAvailable,
+    jsDivergence_bits: rtAvailable
+      ? requireFinite(frame.metrics?.jsDivergence_bits, 'metrics.jsDivergence_bits')
+      : null,
+    rmsDelaySpreadDifference_s: rtAvailable
+      ? requireFinite(
+        frame.metrics?.rmsDelaySpreadDifference_s,
+        'metrics.rmsDelaySpreadDifference_s',
+      )
+      : null,
+    weightedDelayDistance_s: rtAvailable
+      ? requireFinite(frame.metrics?.weightedDelayDistance_s, 'metrics.weightedDelayDistance_s')
+      : null,
+    rtNormalizationStatus: rtAvailable ? normalizationStatus(report, frame) : null,
   };
 }
 

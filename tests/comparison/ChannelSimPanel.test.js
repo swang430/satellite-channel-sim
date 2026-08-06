@@ -5,6 +5,8 @@ import * as React from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ChannelSimPanel from '../../src/ChannelSimPanel.jsx';
+import { generateChannelTimeSeries, predictPasses } from '../../src/model.js';
+import { buildStatisticalPlaybackReport } from '../../src/features/channel-comparison/statisticalPlaybackReport.js';
 
 const { act, createElement } = React;
 globalThis.React = React;
@@ -54,9 +56,31 @@ vi.mock('../../src/model.js', async () => {
         absoluteDelay_ns: 2_000_000,
       },
     }))),
-    predictPasses: vi.fn(() => []),
+    predictPasses: vi.fn(() => [
+      {
+        aos: new Date('2026-08-05T00:00:00.000Z'),
+        los: new Date('2026-08-05T00:02:00.000Z'),
+        durationSec: 120,
+        maxElev: 60,
+      },
+      {
+        aos: new Date('2026-08-05T04:00:00.000Z'),
+        los: new Date('2026-08-05T04:03:00.000Z'),
+        durationSec: 180,
+        maxElev: 35,
+      },
+    ]),
   };
 });
+
+vi.mock('../../src/features/channel-comparison/statisticalPlaybackReport.js', () => ({
+  buildStatisticalPlaybackReport: vi.fn(({ timeline, windowId }) => ({
+    scenarioId: windowId,
+    modelVersion: 'statistical-playback/v1',
+    timeWindow: { source: 'selected-pass', frameCount: timeline.length },
+    frames: timeline.map((frame, index) => ({ frameId: index, time: frame.time })),
+  })),
+}));
 
 vi.mock('../../src/ValidationModule.js', () => ({
   SimulationValidator: class {
@@ -103,8 +127,10 @@ vi.mock('../../src/features/channel-comparison/ChannelComparisonPanel.jsx', () =
 }));
 
 vi.mock('../../src/features/channel-comparison/PdpComparisonPlayer.jsx', () => ({
-  default: ({ rtAvailable, isRefreshing }) => createElement('div', {
+  default: ({ report, rtAvailable, isRefreshing }) => createElement('div', {
     'data-testid': 'comparison-player',
+    'data-model-version': report.modelVersion ?? '',
+    'data-window-source': report.timeWindow?.source ?? '',
     'data-rt-available': String(Boolean(rtAvailable)),
     'data-refreshing': String(Boolean(isRefreshing)),
   }, 'STATISTICAL PDP PLAYER'),
@@ -158,8 +184,7 @@ describe('ChannelSimPanel comparison mode transition', () => {
     container.remove();
   });
 
-  it('clears the free-CIR interval on comparison activation and does not auto-resume', async () => {
-    const clearIntervalSpy = vi.spyOn(window, 'clearInterval');
+  it('auto-searches passes without choosing one and generates statistical PDP after selection', async () => {
     act(() => root.render(createElement(ChannelSimPanel, {
       tleLine1: 'tle-1',
       tleLine2: 'tle-2',
@@ -168,37 +193,37 @@ describe('ChannelSimPanel comparison mode transition', () => {
       groundStation: { lat: 31, lon: 121, alt: 10 },
     })));
 
-    const generateButton = [...container.querySelectorAll('button')]
-      .find((button) => button.textContent.includes('Generate Channel'));
-    act(() => generateButton.click());
+    await act(async () => Promise.resolve());
+
+    expect(predictPasses).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain('Available Passes');
+    expect(container.querySelector('[data-testid="comparison-player"]')).toBeNull();
+    expect(container.textContent).toContain('请选择一个过顶窗口');
+
+    const firstPass = [...container.querySelectorAll('button')]
+      .find((button) => button.textContent.includes('Max 60'));
+    act(() => firstPass.click());
     await act(async () => {
       vi.advanceTimersByTime(50);
       await Promise.resolve();
     });
 
-    const playButton = [...container.querySelectorAll('button')]
-      .find((button) => button.textContent.includes('Play'));
-    act(() => playButton.click());
-    act(() => vi.advanceTimersByTime(1_000));
-    expect(container.textContent).toContain('FREE-1');
-
-    const toolsButton = [...container.querySelectorAll('button')]
-      .find((button) => button.textContent.includes('加载 MPDB'));
-    act(() => toolsButton.click());
-    await flushLazyModules();
-    act(() => container.querySelector('button[aria-label="测试导入 MPDB"]').click());
-    await flushLazyModules();
-    act(() => container.querySelector('button[aria-label="测试发布比较报告"]').click());
-
-    expect(container.querySelector('[data-testid="comparison-player"]')).not.toBeNull();
-    expect(clearIntervalSpy).toHaveBeenCalled();
-
-    act(() => container.querySelector('button[aria-label="测试清除比较报告"]').click());
-    expect(container.textContent).toContain('FREE-1');
-    expect(container.querySelector('input[type="range"]').value).toBe('1');
-    act(() => vi.advanceTimersByTime(2_000));
-    expect(container.textContent).toContain('FREE-1');
-    expect(container.querySelector('input[type="range"]').value).toBe('1');
+    expect(generateChannelTimeSeries).toHaveBeenCalledWith(
+      'tle-1',
+      'tle-2',
+      31,
+      121,
+      10,
+      new Date('2026-08-05T00:00:00.000Z'),
+      new Date('2026-08-05T00:02:00.000Z'),
+      10,
+      expect.any(Object),
+    );
+    expect(buildStatisticalPlaybackReport).toHaveBeenCalledTimes(1);
+    const player = container.querySelector('[data-testid="comparison-player"]');
+    expect(player.dataset.modelVersion).toBe('statistical-playback/v1');
+    expect(player.dataset.windowSource).toBe('selected-pass');
+    expect(player.dataset.rtAvailable).toBe('false');
   });
 
   it('keeps the statistical PDP visible and requests an automatic refresh after parameters change', async () => {
@@ -214,9 +239,10 @@ describe('ChannelSimPanel comparison mode transition', () => {
     ));
 
     renderWithTec(20);
-    const generateButton = [...container.querySelectorAll('button')]
-      .find((button) => button.textContent.includes('Generate Channel'));
-    act(() => generateButton.click());
+    await act(async () => Promise.resolve());
+    const firstPass = [...container.querySelectorAll('button')]
+      .find((button) => button.textContent.includes('Max 60'));
+    act(() => firstPass.click());
     await act(async () => {
       vi.advanceTimersByTime(50);
       await Promise.resolve();

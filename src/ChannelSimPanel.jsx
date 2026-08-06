@@ -14,6 +14,7 @@ import {
     saveCalibrationProfile,
 } from './calibration/storage.js';
 import PdpComparisonPlayer from './features/channel-comparison/PdpComparisonPlayer.jsx';
+import { buildStatisticalPlaybackReport } from './features/channel-comparison/statisticalPlaybackReport.js';
 import {
     currentComparisonReport,
     deriveComparisonRequest,
@@ -21,6 +22,27 @@ import {
 
 const MpdbImportPanel = lazy(() => import('./features/mpdb-import/MpdbImportPanel.jsx'));
 const ChannelComparisonPanel = lazy(() => import('./features/channel-comparison/ChannelComparisonPanel.jsx'));
+
+function buildMpdbTrajectorySamples(scenario, report = null) {
+    return (scenario?.transmitter?.track ?? []).map((point, index) => {
+        const geometry = report?.frames?.[index]?.geometry;
+        return {
+            index,
+            lat: Number.isFinite(point.latitude_deg) ? point.latitude_deg : 0,
+            lon: Number.isFinite(point.longitude_deg) ? point.longitude_deg : 0,
+            alt: Number.isFinite(point.projectedPosition_m?.z)
+                ? point.projectedPosition_m.z / 1_000
+                : 0,
+            azimuth: Number.isFinite(geometry?.azimuth_deg) ? geometry.azimuth_deg : 0,
+            elevation: Number.isFinite(geometry?.elevation_deg) ? geometry.elevation_deg : 0,
+            slantRange: Number.isFinite(geometry?.slantRange_m)
+                ? geometry.slantRange_m / 1_000
+                : 0,
+            time: point.timestampUtc,
+            timeLabel: point.timestampUtc,
+        };
+    });
+}
 
 /**
  * Channel Propagation Simulator Panel
@@ -89,6 +111,7 @@ export default function ChannelSimPanel({
 
     // === Output State ===
     const [generatedTimeline, setGeneratedTimeline] = useState([]);
+    const [statisticalPlaybackReport, setStatisticalPlaybackReport] = useState(null);
     const [mpdbScenario, setMpdbScenario] = useState(null);
     const [comparisonReport, setComparisonReport] = useState(null);
     const [showMpdbTools, setShowMpdbTools] = useState(false);
@@ -100,7 +123,16 @@ export default function ChannelSimPanel({
         useCalibration,
         calibrationProfile: calibProfile,
     }), [calibProfile, env, mpdbScenario?.scenarioId, tec, useCalibration]);
-    const statisticalParameters = comparisonRequest.statisticalParameters;
+    const comparisonStatisticalParameters = comparisonRequest.statisticalParameters;
+    const standaloneStatisticalParameters = useMemo(() => ({
+        environment: env === 'open' ? 'rural' : env,
+        tec_TECU: tec,
+        scatterPowerOffset_dB: useCalibration
+            && calibProfile.calibrated
+            && Number.isFinite(calibProfile.params?.scatterPowerOffset_dB)
+            ? calibProfile.params.scatterPowerOffset_dB
+            : 0,
+    }), [calibProfile, env, tec, useCalibration]);
     const comparisonRequestKey = comparisonRequest.requestKey;
     const activeComparisonReport = currentComparisonReport(
         comparisonReport,
@@ -111,6 +143,7 @@ export default function ChannelSimPanel({
         ? comparisonReport
         : null;
     const displayedComparisonReport = activeComparisonReport ?? comparisonPreviewReport;
+    const displayedPlaybackReport = displayedComparisonReport ?? statisticalPlaybackReport;
     const isComparisonRefreshing = Boolean(
         comparisonPreviewReport
         && !activeComparisonReport
@@ -122,100 +155,113 @@ export default function ChannelSimPanel({
     const [computing, setComputing] = useState(false);
     const [cirIdx, setCirIdx] = useState(0);
     const [statusMsg, setStatusMsg] = useState('');
-    const [isCirPlaying, setIsCirPlaying] = useState(false);
-    const [cirFps, setCirFps] = useState(1);
     const handleComparisonReportChange = useCallback((nextReport) => {
         setComparisonReport(nextReport);
-        if (nextReport) setIsCirPlaying(false);
+        if (nextReport) {
+            setGeneratedTrajectorySamples(buildMpdbTrajectorySamples(mpdbScenario, nextReport));
+        }
+    }, [mpdbScenario]);
+    const handlePlaybackPositionChange = useCallback(({ position }) => {
+        setCirIdx(position);
     }, []);
 
     // === Pass Search State ===
-    const [passes, setPasses] = useState([]);
-    const [selectedPass, setSelectedPass] = useState(null);
-    const [searchingPass, setSearchingPass] = useState(false);
+    const [selectedPassKey, setSelectedPassKey] = useState(null);
+    const [passSearchRevision, setPassSearchRevision] = useState(0);
+    const passes = useMemo(() => {
+        void passSearchRevision;
+        if (!tleLine1 || !tleLine2) return [];
+        try {
+            return predictPasses(tleLine1, tleLine2, gsLat, gsLon, gsAlt, 24, 0);
+        } catch {
+            return [];
+        }
+    }, [gsAlt, gsLat, gsLon, passSearchRevision, tleLine1, tleLine2]);
+    const passKey = useCallback((pass) => JSON.stringify([
+        tleLine1, tleLine2, gsLat, gsLon, gsAlt,
+        pass.aos.toISOString(), pass.los.toISOString(),
+    ]), [gsAlt, gsLat, gsLon, tleLine1, tleLine2]);
+    const selectedPass = useMemo(() => (
+        passes.find((pass) => passKey(pass) === selectedPassKey) ?? null
+    ), [passKey, passes, selectedPassKey]);
 
-    const cirCanvasRef = useRef(null);
     // === Find Next Pass ===
     function handleFindPass() {
         if (!tleLine1 || !tleLine2) {
             setStatusMsg('\u26a0\ufe0f Please load satellite TLE first');
             return;
         }
-        setSearchingPass(true);
-        setStatusMsg('\ud83d\udd0d Searching passes in next 24 hours...');
-        setTimeout(() => {
-            const results = predictPasses(tleLine1, tleLine2, gsLat, gsLon, gsAlt, 24, 0);
-            setPasses(results);
-            if (results.length > 0) {
-                setSelectedPass(results[0]);
-                const passDurMin = Math.ceil(results[0].durationSec / 60) + 4;
-                setDurationMin(passDurMin);
-                setStatusMsg('\u2705 Found ' + results.length + ' passes. Auto-selected nearest (max elev ' + results[0].maxElev.toFixed(1) + '\u00b0)');
-            } else {
-                setSelectedPass(null);
-                setStatusMsg('\u26a0\ufe0f No visible passes in next 24h. Try another satellite.');
-            }
-            setSearchingPass(false);
-        }, 50);
+        setSelectedPassKey(null);
+        setPassSearchRevision((revision) => revision + 1);
+        setStatusMsg(passes.length > 0
+            ? `\u2705 Found ${passes.length} passes. 请选择一个过顶窗口。`
+            : '\u26a0\ufe0f No visible passes in next 24h. Try another satellite.');
     }
 
     // === Generate Timeline ===
-    function handleGenerate(overridePass) {
+    const handleGenerate = useCallback((overridePass) => {
         if (!tleLine1 || !tleLine2) {
             setStatusMsg('\u26a0\ufe0f Please load satellite TLE first');
             return;
         }
+        const targetPass = overridePass?.aos instanceof Date ? overridePass : selectedPass;
+        if (!targetPass) {
+            setStatusMsg('\u26a0\ufe0f 请先选择一个过顶窗口。');
+            return;
+        }
         setComputing(true);
-        setStatusMsg('\u23f3 Generating channel time series...');
-        
-        const isEvent = overridePass && overridePass._reactName;
-        const targetPass = (overridePass && !isEvent) ? overridePass : selectedPass;
+        setStatusMsg('\u23f3 正在生成已选窗口的统计 PDP 时间序列...');
 
         setTimeout(() => {
-            let startTime, endTime;
-            let currentDuration = durationMin;
-            if (targetPass) {
-                startTime = new Date(targetPass.aos.getTime() - 2 * 60000);
-                endTime = new Date(targetPass.los.getTime() + 2 * 60000);
-                currentDuration = Math.ceil(targetPass.durationSec / 60) + 4;
-            } else {
-                // No pass selected — auto-find next visible pass
-                const autoPass = predictPasses(tleLine1, tleLine2, gsLat, gsLon, gsAlt, 24, 5);
-                if (autoPass && autoPass.length > 0) {
-                    const best = autoPass[0];
-                    startTime = new Date(best.aos.getTime() - 2 * 60000);
-                    endTime = new Date(best.los.getTime() + 2 * 60000);
-                    currentDuration = Math.ceil(best.durationSec / 60) + 4;
-                    setStatusMsg('\u2139\ufe0f No pass selected — auto-using next pass (max El ' + best.maxElev.toFixed(1) + '\u00b0, ' + best.aos.toLocaleTimeString() + ')');
-                } else {
-                    startTime = new Date();
-                    endTime = new Date(startTime.getTime() + currentDuration * 60 * 1000);
-                    setStatusMsg('\u26a0\ufe0f No visible pass in 24h. Generating from current time (satellite may be below horizon).');
+            try {
+                let linkParams = { freq, eirp, gRx, tRx, bandwidth, tec, env, rainRate, disableFastFading };
+                if (useCalibration && calibProfile.calibrated) {
+                    linkParams = applyCalibration(linkParams, calibProfile);
                 }
-            }
-            let linkParams = { freq, eirp, gRx, tRx, bandwidth, tec, env, rainRate, disableFastFading };
-            if (useCalibration && calibProfile.calibrated) {
-                linkParams = applyCalibration(linkParams, calibProfile);
-            }
-            const result = generateChannelTimeSeries(
-                tleLine1, tleLine2,
-                gsLat, gsLon, gsAlt,
-                startTime, endTime, stepSec,
-                linkParams
-            );
-            const trajectorySamples = buildTrajectorySamplesFromTimeline(result);
-            setGeneratedTimeline(result);
-            setGeneratedTrajectorySamples(trajectorySamples);
-            setIsCirPlaying(false);
-            setCirIdx(0);
-            const visibleFrames = result.filter(f => f.elevation > 0);
-            if (visibleFrames.length === 0) {
-                setStatusMsg('\u26a0\ufe0f ' + result.length + ' frames generated but satellite NOT visible (elev < 0\u00b0). Click "\ud83d\udd0d Search Passes" to find a visible window.');
-            } else {
+                const result = generateChannelTimeSeries(
+                    tleLine1, tleLine2,
+                    gsLat, gsLon, gsAlt,
+                    targetPass.aos, targetPass.los, stepSec,
+                    linkParams
+                );
+                const windowId = JSON.stringify([
+                    'selected-pass/v1', tleLine1, tleLine2,
+                    gsLat, gsLon, gsAlt,
+                    targetPass.aos.toISOString(), targetPass.los.toISOString(), stepSec,
+                ]);
+                const nextPlaybackReport = buildStatisticalPlaybackReport({
+                    timeline: result,
+                    windowId,
+                    satelliteName: satName,
+                    receiver: {
+                        latitude_deg: gsLat,
+                        longitude_deg: gsLon,
+                        altitude_m: gsAlt,
+                    },
+                    carrier: {
+                        frequency_Hz: freq * 1e9,
+                        bandwidth_Hz: bandwidth * 1e6,
+                    },
+                    statisticalParameters: standaloneStatisticalParameters,
+                });
+                const trajectorySamples = result.map((frame, index) => ({
+                    index,
+                    lat: Number.isFinite(frame.satLat) ? frame.satLat : 0,
+                    lon: Number.isFinite(frame.satLon) ? frame.satLon : 0,
+                    alt: Number.isFinite(frame.satAlt) ? frame.satAlt : 0,
+                    azimuth: Number.isFinite(frame.azimuth) ? frame.azimuth : 0,
+                    elevation: Number.isFinite(frame.elevation) ? frame.elevation : 0,
+                    slantRange: Number.isFinite(frame.slantRange) ? frame.slantRange : 0,
+                    time: frame.time instanceof Date ? frame.time.toISOString() : frame.time,
+                    timeLabel: frame.timeLabel || `Frame ${index + 1}`,
+                }));
+                setGeneratedTimeline(result);
+                setStatisticalPlaybackReport(nextPlaybackReport);
+                setGeneratedTrajectorySamples(trajectorySamples);
+                const visibleFrames = result.filter(f => f.elevation > 0);
                 const maxElFrame = visibleFrames.reduce((a, b) => a.elevation > b.elevation ? a : b);
-                setStatusMsg('\u2705 ' + result.length + ' frames | Visible: ' + visibleFrames.length + ' | Max Elev: ' + maxElFrame.elevation.toFixed(1) + '\u00b0 @ ' + maxElFrame.timeLabel + ' | Peak SNR: ' + maxElFrame.snrDb.toFixed(1) + ' dB');
+                setStatusMsg('\u2705 统计 PDP· ' + result.length + ' frames | Max Elev: ' + maxElFrame.elevation.toFixed(1) + '\u00b0 @ ' + maxElFrame.timeLabel);
 
-                // === Validation Module Call ===
                 try {
                     const validator = new SimulationValidator({
                         frequency: freq * 1e9,
@@ -229,11 +275,22 @@ export default function ChannelSimPanel({
                 } catch(e) {
                     console.error("Simulation Validation Error:", e);
                 }
-                // ==============================
+            } catch (error) {
+                setStatusMsg(`\u26a0\ufe0f 统计 PDP 生成失败：${error.message}`);
+            } finally {
+                setComputing(false);
             }
-            setComputing(false);
         }, 50);
-    }
+    }, [
+        bandwidth, calibProfile, disableFastFading, eirp, env, freq, gRx,
+        gsAlt, gsLat, gsLon, rainRate, satName, selectedPass, standaloneStatisticalParameters,
+        stepSec, tRx, tec, tleLine1, tleLine2, useCalibration,
+    ]);
+
+    useEffect(() => {
+        if (!selectedPass) return;
+        handleGenerate(selectedPass);
+    }, [handleGenerate, selectedPass]);
 
     function safeNum(x, fallback = 0) {
         if (typeof x === 'number' && Number.isFinite(x)) return x;
@@ -263,50 +320,11 @@ export default function ChannelSimPanel({
     const handleMpdbScenarioChange = useCallback((scenario) => {
         setMpdbScenario(scenario);
         setComparisonReport(null);
+        setCirIdx(0);
+        if (scenario) {
+            setGeneratedTrajectorySamples(buildMpdbTrajectorySamples(scenario));
+        }
     }, []);
-
-    function formatFrameTimeLabel(value, fallback = '') {
-        if (!value) return fallback;
-        const date = value instanceof Date ? value : new Date(value);
-        if (Number.isNaN(date.getTime())) return fallback || String(value);
-        return date.toLocaleTimeString();
-    }
-
-    function buildTrajectorySamplesFromTimeline(sourceTimeline) {
-        return (sourceTimeline || []).map((frame, index) => ({
-            index,
-            lat: safeNum(frame.satLat, 0),
-            lon: safeNum(frame.satLon, 0),
-            alt: safeNum(frame.satAlt, 0),
-            azimuth: safeNum(frame.azimuth, 0),
-            elevation: safeNum(frame.elevation, 0),
-            slantRange: safeNum(frame.slantRange, 0),
-            time: frame.time instanceof Date ? frame.time.toISOString() : (frame.time || ''),
-            timeLabel: frame.timeLabel || formatFrameTimeLabel(frame.time, `Frame ${index + 1}`)
-        })).filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lon));
-    }
-
-
-    // === CIR playback ===
-    useEffect(() => {
-        if (!displayedComparisonReport) return;
-        // Both a current comparison and its statistical-only refresh preview own the main PDP.
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setIsCirPlaying(false);
-    }, [displayedComparisonReport]);
-
-    useEffect(() => {
-        if (displayedComparisonReport || !isCirPlaying || timeline.length === 0) return;
-        const intervalMs = Math.max(20, Math.round(1000 / Math.max(1, cirFps)));
-        const timer = setInterval(() => {
-            setCirIdx(prev => {
-                const next = prev + 1;
-                if (next >= timeline.length) return 0;
-                return next;
-            });
-        }, intervalMs);
-        return () => clearInterval(timer);
-    }, [displayedComparisonReport, isCirPlaying, cirFps, timeline.length]);
 
     const prevRequestedIdxRef = useRef(requestedCirIndex);
     useEffect(() => {
@@ -315,7 +333,6 @@ export default function ChannelSimPanel({
         if (prevRequestedIdxRef.current !== requestedCirIndex) {
             prevRequestedIdxRef.current = requestedCirIndex;
             const timer = setTimeout(() => {
-                setIsCirPlaying(false);
                 setCirIdx(requestedCirIndex);
             }, 0);
             return () => clearTimeout(timer);
@@ -324,9 +341,12 @@ export default function ChannelSimPanel({
     }, [requestedCirIndex, timeline.length]);
 
     useEffect(() => {
+        const playbackFrameCount = displayedPlaybackReport?.frames?.length ?? 0;
         onCirSyncStateChange?.({
             isStandaloneMode: false,
-            activeIndex: timeline.length ? cirIdx : 0,
+            activeIndex: playbackFrameCount > 0
+                ? Math.min(cirIdx, playbackFrameCount - 1)
+                : 0,
             samplePoints: generatedTrajectorySamples,
             handshake: null,
             importInfo: mpdbScenario ? {
@@ -340,7 +360,7 @@ export default function ChannelSimPanel({
         });
     }, [
         cirIdx,
-        timeline.length,
+        displayedPlaybackReport,
         generatedTrajectorySamples,
         mpdbScenario,
         tleLine1,
@@ -350,154 +370,6 @@ export default function ChannelSimPanel({
         gsAlt,
         onCirSyncStateChange
     ]);
-
-    // === CIR Canvas ===
-    useEffect(() => {
-        if (displayedComparisonReport || !cirCanvasRef.current || timeline.length === 0) return;
-        const canvas = cirCanvasRef.current;
-        const ctx = canvas.getContext('2d');
-        const W = canvas.width, H = canvas.height;
-
-        ctx.fillStyle = '#0a0a1a';
-        ctx.fillRect(0, 0, W, H);
-
-        const frame = timeline[cirIdx];
-        if (!frame || !frame.cir) return;
-
-        const { taps, rmsDelaySpread_ns, coherenceBandwidth_MHz, absoluteDelay_ns } = frame.cir;
-        const maxExcessDelay = Math.max(1, ...taps.map(t => t.excessDelay_ns)) * 1.3;
-        const losPower = taps[0].amplitude_dB;
-        const minDb = -50;
-        const padL = 60, padR = 20, padT = 40, padB = 45;
-        const plotW = W - padL - padR;
-        const plotH = H - padT - padB;
-
-        ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-        ctx.lineWidth = 0.5;
-        for (let i = 0; i <= 5; i++) {
-            const y = padT + (plotH * i / 5);
-            ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
-        }
-        for (let i = 0; i <= 4; i++) {
-            const x = padL + (plotW * i / 4);
-            ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, H - padB); ctx.stroke();
-        }
-
-        ctx.fillStyle = '#aaa';
-        ctx.font = '10px monospace';
-        ctx.textAlign = 'right';
-        for (let i = 0; i <= 5; i++) {
-            const dbVal = 0 - (i / 5) * Math.abs(minDb);
-            ctx.fillText(dbVal.toFixed(0) + ' dB', padL - 5, padT + (plotH * i / 5) + 4);
-        }
-        ctx.textAlign = 'center';
-        for (let i = 0; i <= 4; i++) {
-            const ns = (maxExcessDelay * i / 4).toFixed(0);
-            ctx.fillText(ns + ' ns', padL + (plotW * i / 4), H - padB + 15);
-        }
-
-        ctx.fillStyle = '#ccc';
-        ctx.font = '11px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('Excess Delay (ns)', padL + plotW / 2, H - 5);
-        ctx.save();
-        ctx.translate(14, padT + plotH / 2);
-        ctx.rotate(-Math.PI / 2);
-        ctx.fillText('Relative Power (dB)', 0, 0);
-        ctx.restore();
-
-        // Below horizon warning
-        if (frame.elevation < 0) {
-            ctx.fillStyle = 'rgba(255,100,100,0.15)';
-            ctx.fillRect(padL, padT, plotW, plotH);
-            ctx.fillStyle = '#ff6b6b';
-            ctx.font = 'bold 14px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText('BELOW HORIZON (El=' + frame.elevation.toFixed(1) + '\u00b0) - No valid CIR', padL + plotW / 2, padT + plotH / 2);
-        }
-
-        const colors = ['#00ff88', '#ff6b6b', '#4ecdc4', '#f7dc6f', '#bb8fce'];
-        
-        // Decluttering logic for dense CIR data (like from Ray Tracing)
-        const isDense = taps.length > 15;
-        // Identify top N strongest paths to keep them prominent and labeled
-        const topTaps = new Set([...taps].sort((a, b) => b.amplitude_dB - a.amplitude_dB).slice(0, 5));
-
-        taps.forEach((tap, i) => {
-            const x = padL + (tap.excessDelay_ns / maxExcessDelay) * plotW;
-            const relPower = tap.amplitude_dB - losPower;
-            const normY = Math.max(0, Math.min(1, -relPower / Math.abs(minDb)));
-            const y = padT + normY * plotH;
-            
-            const isStrong = topTaps.has(tap) || i === 0; // Ensure LOS (i=0) and strongest paths are highlighted
-
-            let colorStr = colors[i % colors.length];
-            if (isDense && !isStrong) {
-                colorStr = 'rgba(120, 150, 180, 0.4)'; // Dim weaker paths in dense mode
-            }
-
-            ctx.strokeStyle = colorStr;
-            ctx.lineWidth = (isDense && !isStrong) ? 0.8 : 2;
-            ctx.beginPath();
-            ctx.moveTo(x, padT + plotH);
-            ctx.lineTo(x, y);
-            ctx.stroke();
-
-            ctx.fillStyle = colorStr;
-            ctx.beginPath();
-            ctx.arc(x, y, (isDense && !isStrong) ? 1.5 : 4, 0, Math.PI * 2);
-            ctx.fill();
-
-            // Label collision avoidance: only label strong paths when dense
-            if (!isDense || isStrong) {
-                ctx.fillStyle = '#fff';
-                ctx.font = isDense ? '8px sans-serif' : '9px sans-serif';
-                ctx.textAlign = 'center';
-                const labelY = y - 10 < padT ? y + 15 : y - 10;
-                
-                // Add a semi-transparent background to labels in dense mode to improve readability over other lines
-                if (isDense) {
-                    const textW = ctx.measureText(tap.label).width;
-                    ctx.fillStyle = 'rgba(10, 10, 26, 0.7)';
-                    ctx.fillRect(x - textW / 2 - 2, labelY - 8, textW + 4, 22);
-                    ctx.fillStyle = '#fff';
-                }
-                
-                ctx.fillText(tap.label, x, labelY);
-                ctx.fillStyle = '#aaa';
-                ctx.fillText(relPower.toFixed(1) + 'dB', x, labelY + 11);
-            }
-        });
-
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 12px sans-serif';
-        ctx.textAlign = 'left';
-        let titleText = 'CIR \u2014 |h(\u03c4)| Power Delay Profile';
-        if (absoluteDelay_ns) {
-            titleText += ` (LOS Delay: ${(absoluteDelay_ns / 1e6).toFixed(4)} ms)`;
-        }
-        ctx.fillText(titleText, padL, 18);
-
-        ctx.fillStyle = '#88ccff';
-        ctx.font = '10px monospace';
-        ctx.textAlign = 'right';
-        // Line 1: Rx power + elevation
-        if (frame.isImportedFrame) {
-            ctx.fillText('RT PathLoss: ' + Math.abs(frame.rtPathLoss ?? frame.rxPowerDbm).toFixed(1) + ' dB | El: ' + frame.elevation.toFixed(1) + '\u00b0', W - padR, 15);
-        } else {
-            ctx.fillText('Rx: ' + (frame.rxPowerDbm ?? 0).toFixed(1) + ' dBm | SNR: ' + (frame.snrDb ?? 0).toFixed(1) + ' dB | El: ' + frame.elevation.toFixed(1) + '\u00b0', W - padR, 15);
-        }
-        // Line 2: PathLoss + DS/Bc
-        const plLabel = frame.isImportedFrame ? '' : 'FSPL: ' + (frame.absoluteFspl ?? 0).toFixed(1) + ' dB | ';
-        ctx.fillText(plLabel + 'DS(\u03c3_\u03c4): ' + rmsDelaySpread_ns.toFixed(2) + ' ns | Bc: ' + coherenceBandwidth_MHz.toFixed(1) + ' MHz', W - padR, 29);
-        // Line 3: Doppler
-        const dopHz = frame.dopplerHz ?? 0;
-        const dopKHz = dopHz / 1000;
-        const dopSign = dopHz >= 0 ? '+' : '';
-        ctx.fillStyle = dopHz >= 0 ? '#7ecfff' : '#ffb347';
-        ctx.fillText('Doppler: ' + dopSign + dopKHz.toFixed(2) + ' kHz (' + (dopHz >= 0 ? 'approaching ↑▲' : 'receding ↓▼') + ')', W - padR, 43);
-
-    }, [displayedComparisonReport, timeline, cirIdx]);
 
     // === CSV Export ===
     function exportCSV() {
@@ -592,7 +464,7 @@ export default function ChannelSimPanel({
     }
 
     // === Chart Data ===
-    const hasChannelOutput = timeline.length > 0 || Boolean(displayedComparisonReport);
+    const hasChannelOutput = Boolean(displayedPlaybackReport);
     const showAnalyticsPanels = timeline.length > 0 && !displayedComparisonReport;
     const chartLabels = useMemo(() => timeline.map(f => f.timeLabel), [timeline]);
 
@@ -778,11 +650,11 @@ export default function ChannelSimPanel({
 
             {/* === Action Buttons === */}
             <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap' }}>
-                <button onClick={handleFindPass} disabled={searchingPass} style={{ ...btnPrimary, background: 'linear-gradient(135deg, #f39c12, #e67e22)' }}>
-                    {searchingPass ? '\u23f3 Searching...' : '\ud83d\udd0d Search Passes'}
+                <button onClick={handleFindPass} style={{ ...btnPrimary, background: 'linear-gradient(135deg, #f39c12, #e67e22)' }}>
+                    {'\ud83d\udd0d Refresh Passes'}
                 </button>
-                <button onClick={handleGenerate} disabled={computing} style={btnPrimary}>
-                    {computing ? '\u23f3 Computing...' : '\ud83d\ude80 Generate Channel TimeSeries'}
+                <button onClick={handleGenerate} disabled={computing || !selectedPass} style={btnPrimary}>
+                    {computing ? '\u23f3 Computing...' : '\ud83d\ude80 Recompute Selected Window'}
                 </button>
                 {timeline.length > 0 && (
                     <>
@@ -1195,10 +1067,9 @@ export default function ChannelSimPanel({
                                 <button
                                     key={i}
                                     onClick={() => {
-                                        setSelectedPass(p);
-                                        setDurationMin(Math.ceil(p.durationSec / 60) + 4);
-                                        setStatusMsg('Selected pass #' + (i + 1) + ': ' + p.aos.toLocaleTimeString() + ' ~ ' + p.los.toLocaleTimeString() + ', max elev ' + p.maxElev.toFixed(1) + '\u00b0. Auto-generating...');
-                                        handleGenerate(p);
+                                        setSelectedPassKey(passKey(p));
+                                        setDurationMin(Math.ceil(p.durationSec / 60));
+                                        setStatusMsg('Selected pass #' + (i + 1) + ': ' + p.aos.toLocaleTimeString() + ' ~ ' + p.los.toLocaleTimeString() + ', max elev ' + p.maxElev.toFixed(1) + '\u00b0. Auto-generating statistical PDP...');
                                     }}
                                     style={{
                                         padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8em', fontFamily: 'monospace',
@@ -1212,12 +1083,6 @@ export default function ChannelSimPanel({
                                 </button>
                             );
                         })}
-                        <button
-                            onClick={() => { setSelectedPass(null); setStatusMsg('Switched to free time mode (starts from now)'); }}
-                            style={{ padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8em', background: !selectedPass ? '#4ecdc4' : '#2c3e50', color: !selectedPass ? '#000' : '#eee', border: !selectedPass ? '2px solid #fff' : '1px solid #555' }}
-                        >
-                            {'\ud83d\udd70\ufe0f'} Start from now
-                        </button>
                     </div>
                 </div>
             )}
@@ -1246,7 +1111,7 @@ export default function ChannelSimPanel({
                             key={comparisonRequestKey}
                             scenario={mpdbScenario}
                             requestKey={comparisonRequestKey}
-                            statisticalParameters={statisticalParameters}
+                            statisticalParameters={comparisonStatisticalParameters}
                             parameterError={comparisonRequest.error}
                             onReportChange={handleComparisonReportChange}
                             autoRun={Boolean(comparisonRequestKey && !activeComparisonReport)}
@@ -1258,7 +1123,9 @@ export default function ChannelSimPanel({
 
             {!hasChannelOutput && (
                 <div style={{ fontSize: '0.85em', color: '#aaa', marginBottom: '15px' }}>
-                    导入 MPDB 接收机轨迹并运行比较，或生成统计信道时间线。
+                    {passes.length > 0
+                        ? '请选择一个过顶窗口，选中后将自动生成统计 PDP 时间序列。'
+                        : '当前 24 小时内没有可用过顶窗口，也可导入 MPDB 时间窗口。'}
                 </div>
             )}
 
@@ -1271,44 +1138,15 @@ export default function ChannelSimPanel({
                         </div>
                     )}
 
-                    {displayedComparisonReport ? (
+                    {displayedPlaybackReport ? (
                         <PdpComparisonPlayer
-                            key={comparisonRequestKey}
-                            report={displayedComparisonReport}
-                            rtAvailable={Boolean(activeComparisonReport)}
+                            key={displayedPlaybackReport.scenarioId}
+                            report={displayedPlaybackReport}
+                            rtAvailable={Boolean(displayedComparisonReport && activeComparisonReport)}
                             isRefreshing={isComparisonRefreshing}
+                            onPositionChange={handlePlaybackPositionChange}
                         />
-                    ) : (
-                    <div style={{ background: 'rgba(0,0,0,0.3)', borderRadius: '6px', padding: '12px', marginBottom: showAnalyticsPanels ? '15px' : 0 }}>
-                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap' }}>
-                            <strong style={{ fontSize: '0.9em' }}>CIR Frame:</strong>
-                            <button
-                                onClick={() => setIsCirPlaying(p => !p)}
-                                style={{ padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', background: isCirPlaying ? '#f39c12' : '#4ecdc4', color: '#000', border: '1px solid #333', fontWeight: 'bold' }}
-                            >
-                                {isCirPlaying ? '⏸ Pause' : '▶ Play'}
-                            </button>
-                            <span style={{ fontSize: '0.85em', color: '#aaa' }}>FPS</span>
-                            <input type="number" min={1} max={60} value={cirFps} onChange={e => setCirFps(parseInt(e.target.value || '5'))} style={{ width: '70px' }} />
-
-                            <input
-                                type="range"
-                                min={0}
-                                max={timeline.length - 1}
-                                value={cirIdx}
-                                onChange={e => { setIsCirPlaying(false); setCirIdx(parseInt(e.target.value)); }}
-                                style={{ flex: 1, minWidth: '240px' }}
-                            />
-                            <span style={{ fontFamily: 'monospace', fontSize: '0.85em', minWidth: '300px', textAlign: 'right' }}>
-                                {timeline[cirIdx]?.timeLabel || ''}
-                                {' | El: '}{safeNum(timeline[cirIdx]?.elevation, 0).toFixed(1)}{'\u00b0'}
-                                {' | SNR: '}{safeNum(timeline[cirIdx]?.snrDb, 0).toFixed(1)}{'dB'}
-                                {' | RxP: '}{safeNum(timeline[cirIdx]?.rxPowerDbm, 0).toFixed(1)}{'dBm'}
-                            </span>
-                        </div>
-                        <canvas ref={cirCanvasRef} width={700} height={280} style={{ width: '100%', borderRadius: '4px' }} />
-                    </div>
-                    )}
+                    ) : null}
 
                     {showAnalyticsPanels && (
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
