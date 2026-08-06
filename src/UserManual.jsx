@@ -481,6 +481,9 @@ export default function UserManual({ onClose }) {
                         <li>自动刷新期间继续显示上一版统计 PDP 基础层，但临时禁用 RT 叠加和三项拟合指标；当前参数计算完成后自动恢复。</li>
                         <li>PDP 以最早路径为零点，10 ns 分箱，同一 bin 内复振幅相干聚合。</li>
                         <li>主 CIR 播放器的 RT 叠加默认开启：统计 median 为青色、P5/P95 为边界、RT PDP 为红色；同时显示真实 frameId、UTC、RX 坐标、运动状态、仰角、斜距和三项拟合指标。</li>
+                        <li>统计 Loss Breakdown、Frame Details、总传播损耗趋势和几何 Doppler 趋势始终保留；导入 MPDB 只增加 RT 指标，不替换统计结果。</li>
+                        <li>RT 总体 Doppler 显示逐径功率加权质心、RMS 扩展和最强径 Doppler；PDP 单个 delay bin 悬浮提示还会显示该 bin 的路径数、Doppler 与 AoA/AoD。</li>
+                        <li>RT 相对增益按 delay bin 内复系数相干合成后再跨 bin 求功率，只相对窗口峰值和首个有效帧显示。</li>
                     </ol>
 
                     <div style={warnStyle}>

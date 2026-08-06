@@ -81,6 +81,8 @@ export async function compareScenario(scenario, {
         ...linkBudgetParameters,
         env: normalizedStatisticalParameters.environment,
         tec: normalizedStatisticalParameters.tec_TECU,
+        simTime: linkBudgetParameters.disableFastFading
+          ? 0 : frameId * scenario.time.sampleInterval_s,
       },
       statisticalResult: statistical,
     });

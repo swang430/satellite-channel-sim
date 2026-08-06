@@ -129,6 +129,22 @@ describe('statistical frame analytics', () => {
     expect(boosted.link.rxPower_dBm - baseline.link.rxPower_dBm).toBeCloseTo(15, 12);
   });
 
+  it('includes the calibrated gas offset in propagation loss', () => {
+    const baseline = build();
+    const calibrated = build({
+      linkParameters: {
+        freq: 99, bandwidth: 1, elevation: 80, slantRange: 1,
+        eirp: 60, gRx: 42, tRx: 150, rainRate: 5, env: 'suburban', tec: 50,
+        isPhasedArray: true, hpbw: 2, disableFastFading: true,
+        gasAttenOffset_dB: 1.25,
+      },
+    });
+    expect(calibrated.loss.components_dB.gas - baseline.loss.components_dB.gas)
+      .toBeCloseTo(1.25, 12);
+    expect(calibrated.loss.totalPropagationLoss_dB - baseline.loss.totalPropagationLoss_dB)
+      .toBeCloseTo(1.25, 12);
+  });
+
   it('returns link, delay, capacity, and per-field method/source metadata', () => {
     const result = build();
 

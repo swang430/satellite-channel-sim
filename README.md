@@ -68,6 +68,8 @@ HOST=0.0.0.0 npm run api
 
 统一 PDP 播放器逐帧显示真实 frameId、UTC、接收机经纬高、移动/静止状态、帧间位移、仰角和斜距。导入 MPDB 后，播放窗口切换为 MPDB 原生起止 UTC、采样间隔和帧数，并增加 Jensen–Shannon divergence、加权时延距离和 RMS 时延扩展差。统计中位数为青色，P5/P95 为区间边界；红色 RT PDP 叠加开关只在 MPDB 模式出现。
 
+统计链路分析不会因导入 MPDB 而消失。播放器始终显示统计总传播损耗、FSPL 与九项损耗分解、Rx/噪声/SNR、时延指标和几何 Doppler，并用同一播放位置驱动总损耗与 Doppler 趋势。RT 导入后另外显示相对窗口峰值/首个有效帧的合成增益、功率加权 Doppler 质心、RMS Doppler 扩展、最强径 Doppler和占比。每个 RT PDP delay bin 的悬浮信息包含路径数、bin 内 Doppler 质心/RMS 以及平均 AoA/AoD。
+
 ### PDP 定义
 
 - 以该帧最早到达路径为 excess-delay 零点；
@@ -83,6 +85,8 @@ reason: UNDEFINED_H_NORMALIZATION
 ```
 
 因此播放器只用于比较 PDP 形状和时延结构，不代表绝对功率拟合。系统不会通过常数偏移伪造 RT 接收功率、SNR 或路径损耗。
+
+RT 窗口相对增益先在每个 delay bin 内相干合成复系数，再跨 bin 求和：`P(t)=Σk|Σl∈k h_l(t)|²`。RT 总体 Doppler 质心使用逐径非相干功率权重 `Σ|h_l|²f_l/Σ|h_l|²`，同时报告 RMS 扩展和最强径；这些量描述频移分布，不等同于单条“终端 Doppler”。
 
 ## 统计信道与几何
 

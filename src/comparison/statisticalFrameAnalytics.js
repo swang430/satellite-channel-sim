@@ -74,6 +74,10 @@ export function buildStatisticalFrameAnalytics({
     + 20 * Math.log10(frequency_Hz / 1e9) + 92.45;
   const components_dB = Object.fromEntries(Object.entries(COMPONENT_FIELDS)
     .map(([name, field]) => [name, requiredFinite(budget[field] ?? 0, `budget.${field}`)]));
+  components_dB.gas += requiredFinite(
+    normalizedParameters.gasAttenOffset_dB ?? 0,
+    'linkParameters.gasAttenOffset_dB',
+  );
   const loss = buildLoss(fspl_dB, components_dB, 'calculated-link-budget');
 
   const eirp_dBW = requiredFinite(linkParameters.eirp ?? 60, 'linkParameters.eirp');
@@ -145,6 +149,9 @@ export function buildStatisticalFrameAnalytics({
 export function adaptSelectedPassFrameAnalytics(frame) {
   const components_dB = Object.fromEntries(Object.entries(COMPONENT_FIELDS)
     .map(([name, field]) => [name, requiredFinite(frame?.[field], `frame.${field}`)]));
+  if (Number.isFinite(frame?.totalAtmosphericLoss)) {
+    components_dB.gas = frame.totalAtmosphericLoss - components_dB.rain - components_dB.cloud;
+  }
   const fspl_dB = requiredFinite(frame?.absoluteFspl, 'frame.absoluteFspl');
   return {
     loss: buildLoss(fspl_dB, components_dB, 'selected-pass-timeline'),

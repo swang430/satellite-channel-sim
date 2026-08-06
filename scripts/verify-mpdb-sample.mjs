@@ -30,6 +30,20 @@ if (paths.length !== 3) {
   assertDynamicComparisonReport(comparisonReport, scenario.time.frameCount);
   const receiverTrackSummary = summarizeReceiverTrack(scenario.receiver.track);
   assertExpectedReceiverTrackMotion(receiverTrackSummary);
+  const finiteRtCentroids = comparisonReport.frames
+    .map((frame) => frame.rt.pathStatistics.dopplerCentroid_Hz)
+    .filter(Number.isFinite);
+  const finiteStatDoppler = comparisonReport.frames
+    .map((frame) => frame.statistical.doppler.geometric_Hz)
+    .filter(Number.isFinite);
+  const finiteRtRelativeGain = comparisonReport.frames
+    .map((frame) => frame.rt.relativeGain.relativeToWindowPeak_dB)
+    .filter(Number.isFinite);
+  if (finiteRtCentroids.length !== scenario.time.frameCount
+    || finiteStatDoppler.length !== scenario.time.frameCount
+    || finiteRtRelativeGain.length !== scenario.time.frameCount) {
+    throw new Error('MPDB 样本验收失败: Doppler 或 RT 相对增益存在非有限帧');
+  }
 
   const renamedScenario = await importMpdbBundle(renameSampleFiles(files));
   assertExpectedMpdbSample(renamedScenario);
@@ -73,6 +87,19 @@ if (paths.length !== 3) {
       stationaryFrameCount: receiverTrackSummary.stationaryFrameCount,
       totalDistance_m: receiverTrackSummary.totalDistance_m,
       elapsed_ms: comparisonElapsed_ms,
+      statisticalDopplerRange_Hz: {
+        min: Math.min(...finiteStatDoppler),
+        max: Math.max(...finiteStatDoppler),
+      },
+      rtDopplerCentroidRange_Hz: {
+        min: Math.min(...finiteRtCentroids),
+        max: Math.max(...finiteRtCentroids),
+      },
+      rtRelativeGainRange_dB: {
+        min: Math.min(...finiteRtRelativeGain),
+        max: Math.max(...finiteRtRelativeGain),
+      },
+      rtAbsolutePathLoss: comparisonReport.frames[0].rt.relativeGain.absolutePathLoss,
     },
     renamedImport: {
       status: 'passed',

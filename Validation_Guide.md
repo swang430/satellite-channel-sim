@@ -104,6 +104,8 @@ MPDB 接收机轨迹是逐帧比较的几何事实源。对 frame N，必须同�
 
 统一 PDP 播放器中统计 median 使用青色，P5/P95 显示为边界，且在没有 MPDB 时也必须可播放。MPDB 模式的 RT 叠加默认开启，RT PDP 使用红色。播放器必须展示窗口起止时间、采样间隔、真实 frameId、UTC、RX 坐标、运动状态、帧间位移、仰角和斜距；MPDB 模式另显示三项拟合指标。环境、TEC 或已启用校准中的散射功率偏移变化后，当前 RT 与拟合结果必须立即失效并自动重算；重算期间统计 PDP 基础层仍须可见。
 
+导入前后都必须出现同一套统计 Loss Breakdown、Frame Details、统计总损耗趋势和几何 Doppler 趋势。统计总传播损耗必须严格等于 FSPL 加 rain、gas、cloud、shadow、Faraday、pointing、scan、multipath、scintillation 九项；EIRP 和接收天线增益不计入传播损耗。导入 RT 后，统计字段不得被替换或隐藏，只能增加 RT 相对增益、Doppler 质心/RMS/最强径和拟合字段。
+
 RT 绝对功率必须保持：
 
 ```text
@@ -111,6 +113,8 @@ unavailable / UNDEFINED_H_NORMALIZATION
 ```
 
 RT 与统计 PDP 必须分别做峰值归一化，只允许比较相对 PDP 的形状和时延结构；不得把图形重叠解释为绝对功率拟合，也不得从 `H` 伪造 SNR、接收功率或路径损耗。
+
+RT 相对总增益验证必须使用 `P(t)=Σk|Σl∈k h_l(t)|²`，并包含同一 delay bin 内反相射线抵消用例。RT Doppler 质心为 `Σ|h_l|²f_l/Σ|h_l|²`，RMS 扩展为相同权重下的标准差；几何 Doppler 由 MPDB 斜距随 UTC 的有限差分获得，接近时符号为正。所有趋势游标必须与 PDP 播放位置一致。
 
 ## 6. 校准
 
