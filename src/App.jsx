@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, BarController, Title, Tooltip, Legend, ScatterController } from 'chart.js';
+import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, BarController, Title, Tooltip, Legend, ScatterController, Filler } from 'chart.js';
 import { Line } from 'react-chartjs-2';
 import './App.css';
 import { calculateLinkBudget, calculateMIMOCapacity, calculateDynamicOrbit, predictPasses, computeGroundTrack, computeSkyTrack, generatePassReplay } from './model';
@@ -20,7 +20,7 @@ const ChannelSimPanel = lazy(() => import('./ChannelSimPanel.jsx'));
 const UserManual = lazy(() => import('./UserManual.jsx'));
 const ApiDashboard = lazy(() => import('./panels/ApiDashboard.jsx'));
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, BarController, Title, Tooltip, Legend, ScatterController);
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, BarController, Title, Tooltip, Legend, ScatterController, Filler);
 ChartJS.defaults.color = 'rgba(0, 229, 255, 0.7)';
 ChartJS.defaults.borderColor = 'rgba(0, 229, 255, 0.1)';
 ChartJS.defaults.font.family = "'Space Mono', monospace";

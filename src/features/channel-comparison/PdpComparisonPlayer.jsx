@@ -4,6 +4,8 @@ import {
   buildComparisonPlaybackFrames,
   nextComparisonPosition,
 } from './comparisonViewModel.js';
+import ChannelAnalyticsPanels from './ChannelAnalyticsPanels.jsx';
+import ChannelTrendCharts from './ChannelTrendCharts.jsx';
 
 const CHART_OPTIONS = Object.freeze({
   responsive: true,
@@ -312,6 +314,8 @@ export default function PdpComparisonPlayer({
           aria-label={`PDP 图表：统计中位数、P5、P95；RT PDP ${rtAvailable && showRtOverlay ? '已显示' : '已隐藏'}`}
         />
       </div>
+      <ChannelAnalyticsPanels analytics={activeFrame.analytics} />
+      <ChannelTrendCharts frames={precomputedPlayback.frames} activePosition={activePosition} />
     </section>
   );
 }
