@@ -39,6 +39,9 @@ export function rtFrameToPdp(scenario, frameId) {
   const paths = Array.from({ length: view.rayCount }, (_, index) => ({
     absoluteDelay_s: view.delay_s[index],
     complexAmplitude: { real: view.hReal[index], imag: view.hImag[index] },
+    doppler_Hz: view.doppler_Hz[index],
+    aoa_deg: view.aoa_deg[index],
+    aod_deg: view.aod_deg[index],
   }));
   const pdp = buildPdp(paths, { bandwidth_Hz: scenario.carrier.bandwidth_Hz });
   return {
@@ -51,4 +54,3 @@ export function rtFrameToPdp(scenario, frameId) {
     },
   };
 }
-

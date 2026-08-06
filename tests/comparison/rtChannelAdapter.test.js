@@ -34,6 +34,13 @@ describe('RT channel frame adapter', () => {
       pathCount: 2,
       coherentPower_linear: 0,
       noncoherentPower_linear: 2,
+      metadata: {
+        pathCount: 2,
+        dopplerCentroid_Hz: 0,
+        dopplerRmsSpread_Hz: 100,
+        meanAoa_deg: 45,
+        meanAod_deg: 15,
+      },
     });
     expect(adapted.absolutePower).toEqual({
       status: 'unavailable',
@@ -42,4 +49,3 @@ describe('RT channel frame adapter', () => {
     expect(JSON.stringify(adapted)).not.toContain('23 + 10');
   });
 });
-

@@ -107,10 +107,14 @@ function rtSeries(frame) {
     if (typeof power !== 'number' || Number.isNaN(power) || power === Number.POSITIVE_INFINITY) {
       invalidComparisonData(`rt.pdp.bins[${index}].relativePower_dB is invalid`);
     }
-    return requireFinitePoint({
+    const point = {
       x: bin.excessDelay_s * 1e9,
       y: power === Number.NEGATIVE_INFINITY ? PLOT_FLOOR_DB : power,
-    }, `rt[${index}]`);
+    };
+    if (bin.metadata || bin.pathCount !== undefined) {
+      point.metadata = bin.metadata ?? { pathCount: bin.pathCount };
+    }
+    return requireFinitePoint(point, `rt[${index}]`);
   });
 }
 

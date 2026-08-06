@@ -31,7 +31,22 @@ const CHART_OPTIONS = Object.freeze({
   },
   plugins: {
     legend: { labels: { color: '#ddd' } },
-    tooltip: { mode: 'nearest', intersect: false },
+    tooltip: {
+      mode: 'nearest',
+      intersect: false,
+      callbacks: {
+        afterBody(items) {
+          const metadata = items?.[0]?.raw?.metadata;
+          if (!metadata) return [];
+          return [
+            `Paths: ${metadata.pathCount ?? 'N/A'}`,
+            `Doppler centroid: ${Number.isFinite(metadata.dopplerCentroid_Hz) ? metadata.dopplerCentroid_Hz.toFixed(3) : 'N/A'} Hz`,
+            `Doppler RMS: ${Number.isFinite(metadata.dopplerRmsSpread_Hz) ? metadata.dopplerRmsSpread_Hz.toFixed(3) : 'N/A'} Hz`,
+            `Mean AoA/AoD: ${Number.isFinite(metadata.meanAoa_deg) ? metadata.meanAoa_deg.toFixed(2) : 'N/A'}° / ${Number.isFinite(metadata.meanAod_deg) ? metadata.meanAod_deg.toFixed(2) : 'N/A'}°`,
+          ];
+        },
+      },
+    },
   },
 });
 

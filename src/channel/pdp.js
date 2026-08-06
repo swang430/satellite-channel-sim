@@ -15,6 +15,20 @@ function pathPower(path) {
   return real * real + imag * imag;
 }
 
+function addWeightedAngle(accumulator, angle_deg, weight) {
+  if (!Number.isFinite(angle_deg)) return;
+  const radians = angle_deg * Math.PI / 180;
+  accumulator.sin += Math.sin(radians) * weight;
+  accumulator.cos += Math.cos(radians) * weight;
+  accumulator.weight += weight;
+}
+
+function weightedAngle(accumulator) {
+  return accumulator.weight > 0
+    ? (Math.atan2(accumulator.sin, accumulator.cos) * 180 / Math.PI + 360) % 360
+    : null;
+}
+
 export function buildPdp(paths, { bandwidth_Hz }) {
   if (!Number.isFinite(bandwidth_Hz) || bandwidth_Hz <= 0) {
     throw new DomainValidationError(
@@ -46,21 +60,52 @@ export function buildPdp(paths, { bandwidth_Hz }) {
       pathCount: 0,
       complexAmplitude: { real: 0, imag: 0 },
       noncoherentPower_linear: 0,
+      pathMetadata: {
+        weight: 0,
+        dopplerWeighted: 0,
+        dopplerSquaredWeighted: 0,
+        aoa: { sin: 0, cos: 0, weight: 0 },
+        aod: { sin: 0, cos: 0, weight: 0 },
+      },
     };
+    const power = pathPower(path);
     bin.pathCount += 1;
     bin.complexAmplitude.real += path.complexAmplitude.real;
     bin.complexAmplitude.imag += path.complexAmplitude.imag;
-    bin.noncoherentPower_linear += pathPower(path);
+    bin.noncoherentPower_linear += power;
+    if (Number.isFinite(path.doppler_Hz)) {
+      bin.pathMetadata.weight += power;
+      bin.pathMetadata.dopplerWeighted += path.doppler_Hz * power;
+      bin.pathMetadata.dopplerSquaredWeighted += path.doppler_Hz ** 2 * power;
+    }
+    addWeightedAngle(bin.pathMetadata.aoa, path.aoa_deg, power);
+    addWeightedAngle(bin.pathMetadata.aod, path.aod_deg, power);
     byBin.set(binIndex, bin);
   }
 
   const bins = [...byBin.values()]
     .sort((left, right) => left.binIndex - right.binIndex)
-    .map((bin) => ({
-      ...bin,
-      coherentPower_linear:
-        bin.complexAmplitude.real ** 2 + bin.complexAmplitude.imag ** 2,
-    }));
+    .map((bin) => {
+      const { pathMetadata, ...publicBin } = bin;
+      const dopplerCentroid_Hz = pathMetadata.weight > 0
+        ? pathMetadata.dopplerWeighted / pathMetadata.weight : null;
+      const dopplerVariance_Hz2 = pathMetadata.weight > 0
+        ? pathMetadata.dopplerSquaredWeighted / pathMetadata.weight - dopplerCentroid_Hz ** 2
+        : null;
+      return {
+        ...publicBin,
+        coherentPower_linear:
+          bin.complexAmplitude.real ** 2 + bin.complexAmplitude.imag ** 2,
+        metadata: {
+          pathCount: bin.pathCount,
+          dopplerCentroid_Hz,
+          dopplerRmsSpread_Hz: dopplerVariance_Hz2 === null
+            ? null : Math.sqrt(Math.max(0, dopplerVariance_Hz2)),
+          meanAoa_deg: weightedAngle(pathMetadata.aoa),
+          meanAod_deg: weightedAngle(pathMetadata.aod),
+        },
+      };
+    });
   const maxCoherentPower = Math.max(...bins.map((bin) => bin.coherentPower_linear));
   for (const bin of bins) {
     bin.coherentPower_dB = bin.coherentPower_linear > 0
@@ -79,4 +124,3 @@ export function buildPdp(paths, { bandwidth_Hz }) {
     bins,
   };
 }
-

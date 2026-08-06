@@ -46,5 +46,20 @@ describe('unified PDP', () => {
     expect(metrics.coherenceBandwidth_Hz).toBeCloseTo(20e6, 3);
     expect(metrics.powerDefinition).toBe('coherentPower_linear');
   });
-});
 
+  it('aggregates path count, Doppler, AoA, and AoD metadata once per delay bin', () => {
+    const pdp = buildPdp([
+      { ...path(0, 1), doppler_Hz: 100, aoa_deg: 350, aod_deg: 10 },
+      { ...path(0, 2), doppler_Hz: 200, aoa_deg: 10, aod_deg: 30 },
+    ], { bandwidth_Hz: 100e6 });
+    const metadata = pdp.bins[0].metadata;
+
+    expect(metadata.pathCount).toBe(2);
+    expect(metadata.dopplerCentroid_Hz).toBeCloseTo(180, 12);
+    expect(metadata.dopplerRmsSpread_Hz).toBeCloseTo(40, 12);
+    expect(metadata.meanAoa_deg).toBeGreaterThan(0);
+    expect(metadata.meanAoa_deg).toBeLessThan(10);
+    expect(metadata.meanAod_deg).toBeGreaterThan(20);
+    expect(metadata.meanAod_deg).toBeLessThan(30);
+  });
+});

@@ -1,7 +1,6 @@
 import {
     lazy, Suspense, useState, useRef, useEffect, useCallback, useMemo,
 } from 'react';
-import { Line, Bar } from 'react-chartjs-2';
 import { generateChannelTimeSeries, predictPasses, calibrateModel, applyCalibration, createDefaultCalibration, getCalibParamDefs } from './model.js';
 import { getSatelliteList, getSatelliteBandParams } from './knownSatellites.js';
 import { SimulationValidator } from './ValidationModule.js';
@@ -478,82 +477,6 @@ export default function ChannelSimPanel({
 
     // === Chart Data ===
     const hasChannelOutput = Boolean(displayedPlaybackReport);
-    const showAnalyticsPanels = timeline.length > 0 && !displayedComparisonReport;
-    const chartLabels = useMemo(() => timeline.map(f => f.timeLabel), [timeline]);
-
-    const rxSnrChartData = useMemo(() => ({
-        labels: chartLabels,
-        datasets: [
-            {
-                label: 'Rx Power (dBm)',
-                data: timeline.map(f => f.elevation > 0 ? f.rxPowerDbm : null),
-                borderColor: '#ff3333',
-                backgroundColor: 'rgba(255, 51, 51, 0.1)',
-                yAxisID: 'y1',
-                tension: 0.3,
-                pointRadius: 0,
-                fill: true,
-                spanGaps: false
-            },
-            {
-                label: 'SNR (dB)',
-                data: timeline.map(f => f.elevation > 0 ? f.snrDb : null),
-                borderColor: '#00e5ff',
-                backgroundColor: 'rgba(0, 229, 255, 0.1)',
-                yAxisID: 'y1',
-                tension: 0.3,
-                pointRadius: 0,
-                spanGaps: false
-            },
-            {
-                label: 'Elevation (\u00b0)',
-                data: timeline.map(f => f.elevation),
-                borderColor: '#00ff66',
-                backgroundColor: 'rgba(0, 255, 102, 0.05)',
-                yAxisID: 'y2',
-                tension: 0.3,
-                pointRadius: 0,
-                borderDash: [4, 2],
-                fill: true
-            }
-        ]
-    }), [timeline, chartLabels]);
-
-    const rxSnrChartOpts = {
-        responsive: true,
-        interaction: { mode: 'index', intersect: false },
-        plugins: {
-            legend: { position: 'top', labels: { color: '#ccc', font: { size: 11 } } },
-            title: { display: true, text: 'Channel Propagation \u2014 Rx Power / SNR / Elevation vs Time', color: '#fff', font: { size: 13 } }
-        },
-        scales: {
-            x: { display: true, ticks: { maxTicksLimit: 12, color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.05)' } },
-            y1: { type: 'linear', position: 'left', title: { display: true, text: 'dBm / dB', color: '#ccc' }, grid: { color: 'rgba(255,255,255,0.08)' }, ticks: { color: '#aaa' } },
-            y2: { type: 'linear', position: 'right', title: { display: true, text: 'Elevation (\u00b0)', color: '#ccc' }, grid: { drawOnChartArea: false }, ticks: { color: '#aaa' } }
-        }
-    };
-
-    const currentFrame = timeline[cirIdx];
-    const attBreakdownData = currentFrame ? {
-        labels: ['FSPL', 'Rain', 'Gas', 'Cloud', 'Shadow', 'Faraday', 'Pointing', 'Scint'],
-        datasets: [{
-            label: 'Loss (dB)',
-            data: [
-                currentFrame.absoluteFspl,
-                currentFrame.attRain,
-                currentFrame.attGas,
-                currentFrame.attCloud,
-                currentFrame.fadeLMS,
-                currentFrame.lossFaraday,
-                currentFrame.pointingLoss,
-                Math.abs(currentFrame.scintLoss)
-            ],
-            backgroundColor: [
-                '#ff6b6b', '#f39c12', '#e74c3c', '#9b59b6',
-                '#3498db', '#1abc9c', '#e67e22', '#2ecc71'
-            ]
-        }]
-    } : null;
 
     // === Styles ===
     const panelStyle = {
@@ -1146,12 +1069,6 @@ export default function ChannelSimPanel({
             {/* === Output Area === */}
             {hasChannelOutput && (
                 <>
-                    {showAnalyticsPanels && (
-                        <div style={{ background: 'rgba(0,0,0,0.3)', borderRadius: '6px', padding: '12px', marginBottom: '15px' }}>
-                            <Line data={rxSnrChartData} options={rxSnrChartOpts} />
-                        </div>
-                    )}
-
                     {displayedPlaybackReport ? (
                         <PdpComparisonPlayer
                             key={displayedPlaybackReport.scenarioId}
@@ -1161,54 +1078,6 @@ export default function ChannelSimPanel({
                             onPositionChange={handlePlaybackPositionChange}
                         />
                     ) : null}
-
-                    {showAnalyticsPanels && (
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
-                            {attBreakdownData && (
-                                <div style={{ background: 'rgba(0,0,0,0.3)', borderRadius: '6px', padding: '12px' }}>
-                                    <Bar data={attBreakdownData} options={{
-                                        responsive: true,
-                                        plugins: {
-                                            legend: { display: false },
-                                            title: { display: true, text: 'Loss Breakdown @ ' + (currentFrame?.timeLabel || ''), color: '#fff', font: { size: 12 } }
-                                        },
-                                        scales: {
-                                            x: { ticks: { color: '#aaa', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.05)' } },
-                                            y: { title: { display: true, text: 'dB', color: '#ccc' }, ticks: { color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.08)' } }
-                                        }
-                                    }} />
-                                </div>
-                            )}
-
-                            {currentFrame && (
-                                <div style={{ background: 'rgba(0,0,0,0.3)', borderRadius: '6px', padding: '12px', fontSize: '0.88em' }}>
-                                    <h4 style={{ margin: '0 0 8px 0', color: currentFrame.elevation > 0 ? '#4ecdc4' : '#ff6b6b' }}>
-                                        {currentFrame.elevation > 0 ? '\u2705' : '\u26a0\ufe0f'} Frame Details {currentFrame.elevation <= 0 ? '(Below Horizon)' : ''}
-                                    </h4>
-                                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                                        <tbody>
-                                            {[
-                                                ['Elevation', currentFrame.elevation.toFixed(2) + '\u00b0', 'Azimuth', currentFrame.azimuth.toFixed(1) + '\u00b0'],
-                                                ['Range', currentFrame.slantRange.toFixed(1) + ' km', 'FSPL', currentFrame.absoluteFspl.toFixed(2) + ' dB'],
-                                                ['Rx Power', currentFrame.rxPowerDbm.toFixed(2) + ' dBm', 'SNR', currentFrame.snrDb.toFixed(2) + ' dB'],
-                                                ['Noise Floor', currentFrame.noiseFloorDbm.toFixed(2) + ' dBm', 'T_sky', currentFrame.tSky.toFixed(1) + ' K'],
-                                                ['XPD', currentFrame.xpd.toFixed(2) + ' dB', 'MIMO R2', currentFrame.capRank2.toFixed(2) + ' bps/Hz'],
-                                                ['Group Delay', currentFrame.groupDelayNs.toFixed(2) + ' ns', 'Dispersion', currentFrame.dispersionNs.toFixed(3) + ' ns'],
-                                                ['\u03c3_\u03c4', currentFrame.cir.rmsDelaySpread_ns.toFixed(2) + ' ns', 'Bc', currentFrame.cir.coherenceBandwidth_MHz.toFixed(1) + ' MHz'],
-                                            ].map((row, i) => (
-                                                <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                                                    <td style={{ padding: '3px 6px', color: '#aaa' }}>{row[0]}</td>
-                                                    <td style={{ padding: '3px 6px', fontFamily: 'monospace', fontWeight: 'bold' }}>{row[1]}</td>
-                                                    <td style={{ padding: '3px 6px', color: '#aaa' }}>{row[2]}</td>
-                                                    <td style={{ padding: '3px 6px', fontFamily: 'monospace', fontWeight: 'bold' }}>{row[3]}</td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            )}
-                        </div>
-                    )}
                 </>
             )}
         </div>
