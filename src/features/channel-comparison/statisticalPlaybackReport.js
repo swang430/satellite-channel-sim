@@ -1,4 +1,5 @@
 import { runStatisticalEnsemble } from '../../comparison/statisticalEnsemble.js';
+import { adaptSelectedPassFrameAnalytics } from '../../comparison/statisticalFrameAnalytics.js';
 import { DomainValidationError } from '../../domain/validation.js';
 
 export const STATISTICAL_PLAYBACK_MODEL_VERSION = 'statistical-playback/v1';
@@ -52,6 +53,19 @@ export function buildStatisticalPlaybackReport({
       elevation_deg: finite(frame.elevation, `timeline[${index}].elevation`),
       slantRange_m: finite(frame.slantRange, `timeline[${index}].slantRange`) * 1_000,
     };
+    const statistical = runStatisticalEnsemble({
+      scenarioId: windowId,
+      frameId,
+      geometry,
+      carrier,
+      ...statisticalParameters,
+      realizationCount,
+    });
+    statistical.linkBudget = adaptSelectedPassFrameAnalytics(frame);
+    statistical.doppler = {
+      geometric_Hz: finite(frame.dopplerHz, `timeline[${index}].dopplerHz`),
+      method: 'sgp4-range-rate',
+    };
     return {
       frameId,
       timestampUtc: timestamp,
@@ -69,14 +83,8 @@ export function buildStatisticalPlaybackReport({
         rxPower_dBm: finite(frame.rxPowerDbm, `timeline[${index}].rxPowerDbm`),
         snr_dB: finite(frame.snrDb, `timeline[${index}].snrDb`),
       },
-      statistical: runStatisticalEnsemble({
-        scenarioId: windowId,
-        frameId,
-        geometry,
-        carrier,
-        ...statisticalParameters,
-        realizationCount,
-      }),
+      dopplerHz: statistical.doppler.geometric_Hz,
+      statistical,
     };
   });
 
