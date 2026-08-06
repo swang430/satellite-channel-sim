@@ -96,6 +96,53 @@ function comparisonReportFixture() {
 }
 
 describe('comparison PDP view model', () => {
+  it('renders PDP bins as isolated vertical stems and P5-P95 intervals', () => {
+    const chartData = buildComparisonChartData(buildComparisonFrameView(
+      comparisonFrameFixture(),
+      { showRtOverlay: true },
+    ));
+    const median = chartData.datasets.find((dataset) => (
+      dataset.source === 'statistical-median'
+    ));
+    const interval = chartData.datasets.find((dataset) => (
+      dataset.source === 'statistical-p5-p95'
+    ));
+    const rt = chartData.datasets.find((dataset) => dataset.source === 'rt');
+
+    expect(chartData.datasets.map((dataset) => dataset.source)).toEqual([
+      'statistical-median',
+      'statistical-p5-p95',
+      'rt',
+    ]);
+    expect(median.data).toEqual([
+      { x: 0, y: -120, pointRole: 'baseline' },
+      { x: 0, y: 0, pointRole: 'tap' },
+      { x: 0, y: null, pointRole: 'separator' },
+      { x: 10, y: -120, pointRole: 'baseline' },
+      { x: 10, y: -10, pointRole: 'tap' },
+      { x: 10, y: null, pointRole: 'separator' },
+    ]);
+    expect(interval.data).toEqual([
+      { x: 0, y: expect.closeTo(-3.0103, 3), pointRole: 'p5' },
+      { x: 0, y: 0, pointRole: 'p95' },
+      { x: 0, y: null, pointRole: 'separator' },
+      { x: 10, y: expect.closeTo(-13.0103, 3), pointRole: 'p5' },
+      { x: 10, y: expect.closeTo(-6.9897, 3), pointRole: 'p95' },
+      { x: 10, y: null, pointRole: 'separator' },
+    ]);
+    expect(rt.data).toEqual([
+      { x: 0, y: -120, pointRole: 'baseline' },
+      { x: 0, y: 0, pointRole: 'tap' },
+      { x: 0, y: null, pointRole: 'separator' },
+      { x: 10, y: -120, pointRole: 'baseline' },
+      { x: 10, y: -6, pointRole: 'tap' },
+      { x: 10, y: null, pointRole: 'separator' },
+    ]);
+    expect(median.spanGaps).toBe(false);
+    expect(interval.spanGaps).toBe(false);
+    expect(rt.spanGaps).toBe(false);
+  });
+
   it('maps semantic PDP datasets to stable Chart.js styles without changing their meaning', () => {
     const view = buildComparisonFrameView(comparisonFrameFixture(), {
       showRtOverlay: true,
@@ -106,38 +153,35 @@ describe('comparison PDP view model', () => {
     const median = chartData.datasets.find((dataset) => (
       dataset.source === 'statistical-median'
     ));
-    const p5 = chartData.datasets.find((dataset) => dataset.source === 'statistical-p5');
-    const p95 = chartData.datasets.find((dataset) => dataset.source === 'statistical-p95');
+    const interval = chartData.datasets.find((dataset) => (
+      dataset.source === 'statistical-p5-p95'
+    ));
     const rt = chartData.datasets.find((dataset) => dataset.source === 'rt');
 
     expect(median).toMatchObject({
       label: '统计中位数',
       frameId: 3,
-      data: view.datasets[0].data,
       borderColor: '#53dfc3',
       showLine: true,
+      spanGaps: false,
       parsing: false,
     });
     expect(rt).toMatchObject({
       label: 'RT PDP',
       frameId: 3,
-      data: view.datasets[3].data,
       borderColor: '#ff665f',
       showLine: true,
+      spanGaps: false,
       parsing: false,
     });
-    expect(rt.pointRadius).toBeGreaterThan(0);
-    for (const percentile of [p5, p95]) {
-      expect(percentile).toMatchObject({
-        frameId: 3,
-        showLine: true,
-        parsing: false,
-        borderDash: [4, 4],
-      });
-      expect(percentile.borderColor).toMatch(/^rgba\(83,\s*223,\s*195,\s*0\.[0-9]+\)$/);
-    }
-    expect(p5.label).toBe('统计 P5');
-    expect(p95.label).toBe('统计 P95');
+    expect(interval).toMatchObject({
+      label: '统计 P5–P95 区间',
+      frameId: 3,
+      showLine: true,
+      spanGaps: false,
+      parsing: false,
+    });
+    expect(interval.borderColor).toMatch(/^rgba\(83,\s*223,\s*195,\s*0\.[0-9]+\)$/);
     expect(view).toEqual(semanticSnapshot);
   });
 
@@ -148,6 +192,11 @@ describe('comparison PDP view model', () => {
     expect(data.statisticalMedian).toEqual([{ x: 0, y: 0 }, { x: 10, y: -10 }]);
     expect(data.statisticalP5[0].y).toBeCloseTo(-3.0103, 3);
     expect(data.statisticalP95[1].y).toBeCloseTo(-6.9897, 3);
+    expect(data.statisticalP5P95[1]).toEqual({
+      x: 10,
+      yMin: data.statisticalP5[1].y,
+      yMax: data.statisticalP95[1].y,
+    });
   });
 
   it('uses one real frame ID for every dataset and omits RT when disabled', () => {
@@ -158,8 +207,7 @@ describe('comparison PDP view model', () => {
     expect(hidden.datasets.some((set) => set.source === 'rt')).toBe(false);
     expect(hidden.datasets.map((set) => set.source)).toEqual([
       'statistical-median',
-      'statistical-p5',
-      'statistical-p95',
+      'statistical-p5-p95',
     ]);
     expect(shown.datasets.some((set) => set.source === 'rt')).toBe(true);
     expect(shown.datasets.every((set) => set.frameId === 8)).toBe(true);
@@ -182,8 +230,7 @@ describe('comparison PDP view model', () => {
 
     expect(playback.chartData.datasets.map((dataset) => dataset.source)).toEqual([
       'statistical-median',
-      'statistical-p5',
-      'statistical-p95',
+      'statistical-p5-p95',
     ]);
     expect(playback.summary).toMatchObject({
       rtAvailable: false,

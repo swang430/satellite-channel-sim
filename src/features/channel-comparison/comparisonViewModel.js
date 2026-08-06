@@ -7,27 +7,19 @@ const CHART_DATASET_STYLES = Object.freeze({
   'statistical-median': Object.freeze({
     label: '统计中位数',
     borderColor: '#53dfc3',
-    pointRadius: 1,
+    pointRadius: 0,
     borderWidth: 2,
   }),
-  'statistical-p5': Object.freeze({
-    label: '统计 P5',
+  'statistical-p5-p95': Object.freeze({
+    label: '统计 P5–P95 区间',
     borderColor: 'rgba(83, 223, 195, 0.35)',
     pointRadius: 0,
-    borderWidth: 1,
-    borderDash: Object.freeze([4, 4]),
-  }),
-  'statistical-p95': Object.freeze({
-    label: '统计 P95',
-    borderColor: 'rgba(83, 223, 195, 0.35)',
-    pointRadius: 0,
-    borderWidth: 1,
-    borderDash: Object.freeze([4, 4]),
+    borderWidth: 3,
   }),
   rt: Object.freeze({
     label: 'RT PDP',
     borderColor: '#ff665f',
-    pointRadius: 2,
+    pointRadius: 0,
     borderWidth: 2,
   }),
 });
@@ -86,10 +78,18 @@ function statisticalSeries(frame) {
     x: delays[index] * 1e9,
     y: relativeDb(value, reference),
   }, `${name}[${index}]`));
-  return Object.fromEntries(seriesEntries.map(([name, values]) => [
+  const series = Object.fromEntries(seriesEntries.map(([name, values]) => [
     name,
     buildSeries(values, name),
   ]));
+  return {
+    ...series,
+    statisticalP5P95: series.statisticalP5.map((point, index) => ({
+      x: point.x,
+      yMin: point.y,
+      yMax: series.statisticalP95[index].y,
+    })),
+  };
 }
 
 function rtSeries(frame) {
@@ -193,14 +193,9 @@ export function buildComparisonFrameView(frame, { showRtOverlay = true } = {}) {
       data: plot.statisticalMedian,
     },
     {
-      source: 'statistical-p5',
+      source: 'statistical-p5-p95',
       frameId: frame.frameId,
-      data: plot.statisticalP5,
-    },
-    {
-      source: 'statistical-p95',
-      frameId: frame.frameId,
-      data: plot.statisticalP95,
+      data: plot.statisticalP5P95,
     },
   ];
   if (showRtOverlay && plot.rt) {
@@ -219,11 +214,24 @@ export function buildComparisonChartData(frameView) {
       if (!style) {
         invalidComparisonData(`Unsupported comparison dataset source: ${dataset?.source}`);
       }
+      const data = dataset.source === 'statistical-p5-p95'
+        ? dataset.data.flatMap((point) => [
+          { x: point.x, y: point.yMin, pointRole: 'p5' },
+          { x: point.x, y: point.yMax, pointRole: 'p95' },
+          { x: point.x, y: null, pointRole: 'separator' },
+        ])
+        : dataset.data.flatMap((point) => [
+          { x: point.x, y: PLOT_FLOOR_DB, pointRole: 'baseline' },
+          { ...point, pointRole: 'tap' },
+          { x: point.x, y: null, pointRole: 'separator' },
+        ]);
       return {
         ...dataset,
         ...style,
+        data,
         borderDash: style.borderDash ? [...style.borderDash] : undefined,
         showLine: true,
+        spanGaps: false,
         parsing: false,
         tension: 0,
         fill: false,

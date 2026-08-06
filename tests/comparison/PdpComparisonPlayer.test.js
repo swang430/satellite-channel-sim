@@ -183,8 +183,7 @@ describe('PdpComparisonPlayer', () => {
     expect(overlay.checked).toBe(true);
     expect(chartSources(container)).toEqual([
       'statistical-median',
-      'statistical-p5',
-      'statistical-p95',
+      'statistical-p5-p95',
       'rt',
     ]);
     expect(container.querySelector('[role="img"]').getAttribute('aria-label'))
@@ -195,8 +194,7 @@ describe('PdpComparisonPlayer', () => {
     expect(overlay.checked).toBe(false);
     expect(chartSources(container)).toEqual([
       'statistical-median',
-      'statistical-p5',
-      'statistical-p95',
+      'statistical-p5-p95',
     ]);
     expect(container.querySelector('[role="img"]').getAttribute('aria-label'))
       .toContain('RT PDP 已隐藏');
@@ -213,8 +211,7 @@ describe('PdpComparisonPlayer', () => {
     expect(overlay.checked).toBe(false);
     expect(chartSources(container)).toEqual([
       'statistical-median',
-      'statistical-p5',
-      'statistical-p95',
+      'statistical-p5-p95',
     ]);
     expect(container.textContent).toContain('统计 PDP 正在根据新的场景参数自动刷新');
     expect(container.textContent).not.toContain('JS divergence');
@@ -228,8 +225,7 @@ describe('PdpComparisonPlayer', () => {
     expect(container.querySelector('input[aria-label="RT 叠加"]')).toBeNull();
     expect(chartSources(container)).toEqual([
       'statistical-median',
-      'statistical-p5',
-      'statistical-p95',
+      'statistical-p5-p95',
     ]);
     expect(container.textContent).toContain('已选过顶窗口');
     expect(container.textContent).toContain('2026-08-05T00:00:03.000Z');
